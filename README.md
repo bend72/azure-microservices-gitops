@@ -290,25 +290,34 @@ Set these in the repo's **Settings → Secrets and variables → Actions**:
 
 ## Source Application Repositories
 
-This GitOps repo is the **platform layer** — it defines how services are deployed, scaled, and observed. The actual application code lives in separate repos:
+This GitOps repo is the **platform layer** — it defines how services are deployed, scaled, and observed. The application source code is included as **git submodules** under `src/`:
 
-| Stage | App | Source | Notes |
-|---|---|---|---|
-| 1 | ASP.NET Monolith | [eShopModernizing](https://github.com/dotnet-architecture/eShopModernizing) | Deploy the containerised variant to App Service |
-| 2–3 | 7 Microservices | [eShopOnDapr](https://github.com/dotnet-architecture/eShopOnDapr) | .NET 8 services built on Dapr pub/sub — maps directly to the catalog/ordering/basket/identity/payment/notification structure used here |
-
-**eShopOnDapr service → namespace mapping:**
-
-| eShopOnDapr service | This platform's namespace | Data store |
+| Path | Repo | Stage |
 |---|---|---|
-| `catalog-api` | `catalog` | Cosmos DB |
-| `basket-api` | `basket` | Cosmos DB |
-| `ordering-api` | `ordering` | Azure SQL |
-| `payment-api` | `payment` | Azure SQL |
-| `identity-api` | `identity` | Stateless |
-| `notification` (webhooks) | `notification` | Stateless |
+| `src/monolith` | [eShopModernizing](https://github.com/dotnet-architecture/eShopModernizing) | Stage 1 — ASP.NET monolith on App Service |
+| `src/eshop-on-dapr` | [eShopOnDapr](https://github.com/dotnet-architecture/eShopOnDapr) | Stages 2–3 — .NET 8 microservices on Dapr |
 
-For CI to work, place each service's source under `src/<namespace>/` (e.g. `src/catalog/`) with a distroless multi-stage `Dockerfile`. The CI workflow detects which directories changed and builds only the affected services.
+**Clone with submodules:**
+
+```bash
+git clone --recurse-submodules https://github.com/bend72/azure-microservices-gitops.git
+
+# Already cloned without submodules?
+git submodule update --init --recursive
+```
+
+**eShopOnDapr service → platform namespace mapping:**
+
+| Submodule path | Platform namespace | Data store |
+|---|---|---|
+| `src/eshop-on-dapr/src/Services/Catalog.API` | `catalog` | Cosmos DB |
+| `src/eshop-on-dapr/src/Services/Basket.API` | `basket` | Cosmos DB |
+| `src/eshop-on-dapr/src/Services/Ordering.API` | `ordering` | Azure SQL |
+| `src/eshop-on-dapr/src/Services/Payment.API` | `payment` | Azure SQL |
+| `src/eshop-on-dapr/src/Services/Identity.API` | `identity` | Stateless |
+| `src/eshop-on-dapr/src/Services/Webhooks.API` | `notification` | Stateless |
+
+> **CI note:** The CI workflow expects Dockerfiles at `src/<service>/Dockerfile`. eShopOnDapr services live deeper in the submodule tree. Either add per-service symlinks at the `src/` level or update the `file:` path in `.github/workflows/ci.yaml` to point into the submodule (e.g. `src/eshop-on-dapr/src/Services/Catalog.API/Dockerfile`).
 
 ---
 
