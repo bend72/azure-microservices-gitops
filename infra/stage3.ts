@@ -5,7 +5,11 @@ import * as azure_native from "@pulumi/azure-native";
 // ---------------------------------------------------------------------------
 // Wire up to stage2 outputs
 // ---------------------------------------------------------------------------
-const stage2 = new pulumi.StackReference("org/azure-microservices-stage2/demo");
+const cfg        = new pulumi.Config();
+const pulumiOrg  = cfg.require("pulumiOrg");   // your Pulumi Cloud organisation slug
+const env        = cfg.get("env") ?? "demo";
+
+const stage2 = new pulumi.StackReference(`${pulumiOrg}/azure-microservices-stage2/${env}`);
 
 const aksClusterName   = stage2.getOutput("aksClusterName");
 const aksResourceGroup = stage2.getOutput("aksResourceGroup");

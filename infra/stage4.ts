@@ -5,12 +5,16 @@ import * as azure_native from "@pulumi/azure-native";
 // ---------------------------------------------------------------------------
 // Wire up to stage2 + stage3 outputs
 // ---------------------------------------------------------------------------
-const cfg    = new pulumi.Config();
-const gitOrg = cfg.require("gitOrg");   // e.g. "contoso"
-const gitRepo = cfg.get("gitRepo") ?? "azure-microservices-gitops";
+const cfg       = new pulumi.Config();
+const pulumiOrg = cfg.require("pulumiOrg");  // Pulumi Cloud organisation slug
+const env       = cfg.get("env")       ?? "demo";
+const gitOrg    = cfg.require("gitOrg");     // GitHub org that owns the gitops repo
+const gitRepo   = cfg.get("gitRepo")   ?? "azure-microservices-gitops";
 const gitBranch = cfg.get("gitBranch") ?? "main";
+const tenantId        = cfg.require("tenantId");        // Entra ID tenant for ArgoCD SSO
+const argoCdClientId  = cfg.require("argoCdClientId");  // App registration client ID for SSO
 
-const stage2 = new pulumi.StackReference("org/azure-microservices-stage2/demo");
+const stage2 = new pulumi.StackReference(`${pulumiOrg}/azure-microservices-stage2/${env}`);
 const aksClusterName   = stage2.getOutput("aksClusterName");
 const aksResourceGroup = stage2.getOutput("aksResourceGroup");
 
@@ -52,11 +56,11 @@ const argocd = new k8s.helm.v3.Release("argocd", {
         // Enable Helm + Kustomize
         "kustomize.enabled":     "true",
         "helm.enabled":          "true",
-        // SSO — wire to Entra ID (client-id patched by Backstage template)
-        "oidc.config": `
+        // SSO — Entra ID OIDC (tenantId + argoCdClientId from pulumi config)
+        "oidc.config": pulumi.interpolate`
 name: Azure AD
-issuer: https://login.microsoftonline.com/TENANT_ID/v2.0
-clientID: ARGOCD_CLIENT_ID
+issuer: https://login.microsoftonline.com/${tenantId}/v2.0
+clientID: ${argoCdClientId}
 clientSecret: $argocd-azure-secret:oidc.azure.clientSecret
 requestedScopes:
   - openid

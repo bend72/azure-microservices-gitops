@@ -76,6 +76,243 @@ azure-microservices-gitops/
 
 ---
 
+## How to Deploy
+
+Follow this guide end-to-end before running any `pulumi up`. Each section maps to a blocking dependency for the stage that follows it.
+
+### 1. Fork and clone
+
+```bash
+git clone --recurse-submodules https://github.com/YOUR_ORG/azure-microservices-gitops.git
+cd azure-microservices-gitops
+```
+
+If you already cloned without submodules:
+```bash
+git submodule update --init --recursive
+```
+
+---
+
+### 2. Azure — one-time setup
+
+#### 2a. Create a Service Principal with OIDC federation (for GitHub Actions)
+
+```bash
+# Create an app registration
+az ad app create --display-name "sp-gitops-ci"
+APP_ID=$(az ad app list --display-name "sp-gitops-ci" --query "[0].appId" -o tsv)
+SP_OBJ_ID=$(az ad sp create --id $APP_ID --query "id" -o tsv)
+
+# Contributor on the subscription
+az role assignment create \
+  --assignee $APP_ID \
+  --role Contributor \
+  --scope /subscriptions/YOUR_SUBSCRIPTION_ID
+
+# Federated credential so GitHub Actions can authenticate without a stored secret
+az ad app federated-credential create --id $APP_ID --parameters '{
+  "name": "github-oidc-main",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "subject": "repo:YOUR_ORG/azure-microservices-gitops:ref:refs/heads/main",
+  "audiences": ["api://AzureADUserImpersonation"]
+}'
+
+# Print the values you will need for GitHub secrets
+echo "AZURE_CLIENT_ID:       $APP_ID"
+echo "AZURE_TENANT_ID:       $(az account show --query tenantId -o tsv)"
+echo "AZURE_SUBSCRIPTION_ID: $(az account show --query id -o tsv)"
+```
+
+#### 2b. Create a second App Registration for ArgoCD SSO *(Stage 4 only)*
+
+```bash
+az ad app create --display-name "app-argocd-sso" \
+  --web-redirect-uris "https://argocd.YOUR_DOMAIN/auth/callback"
+ARGOCD_APP_ID=$(az ad app list --display-name "app-argocd-sso" --query "[0].appId" -o tsv)
+echo "argoCdClientId: $ARGOCD_APP_ID"
+# Create a client secret and save it — you will store it as a Kubernetes secret after Stage 4
+az ad app credential reset --id $ARGOCD_APP_ID
+```
+
+---
+
+### 3. GitHub — secrets and variables
+
+Go to **Settings → Secrets and variables → Actions** in your fork.
+
+#### Secrets (sensitive — never logged)
+
+| Secret | How to obtain |
+|---|---|
+| `AZURE_CLIENT_ID` | App registration client ID from step 2a |
+| `AZURE_TENANT_ID` | `az account show --query tenantId -o tsv` |
+| `AZURE_SUBSCRIPTION_ID` | `az account show --query id -o tsv` |
+| `PULUMI_ACCESS_TOKEN` | [app.pulumi.com](https://app.pulumi.com) → your profile → Access Tokens |
+| `GITOPS_PAT` | GitHub → Settings → Developer settings → PAT (classic), scopes: `repo` |
+| `ARGOCD_AUTH_TOKEN` | Generated after Stage 4: `argocd account generate-token --account ci` |
+| `APIM_GATEWAY_URL` | Pulumi stage2 output: `pulumi stack output apimGatewayUrl` |
+| `APIM_SUBSCRIPTION_KEY` | Azure Portal → APIM → Subscriptions |
+| `TEAMS_WEBHOOK_URI` | Teams channel → Connectors → Incoming Webhook |
+| `BACKSTAGE_GITHUB_APP_ID` | GitHub App created for Backstage integration |
+| `BACKSTAGE_GITHUB_PRIVATE_KEY` | Private key downloaded when creating the GitHub App |
+| `AUTH_MICROSOFT_CLIENT_ID` | Entra App registration for Backstage SSO |
+| `AUTH_MICROSOFT_CLIENT_SECRET` | Client secret for the above |
+| `AUTH_MICROSOFT_TENANT_ID` | Same tenant ID as above |
+
+#### Variables (non-sensitive — visible in logs)
+
+Go to **Settings → Secrets and variables → Actions → Variables tab**.
+
+| Variable | Value |
+|---|---|
+| `ACR_LOGIN_SERVER` | e.g. `acrstage2demo.azurecr.io` (stage2 output: `pulumi stack output acrLoginServer`) |
+| `ARGOCD_SERVER` | e.g. `argocd.yourdomain.internal` — your ArgoCD ingress hostname |
+| `GATEKEEPER_TEST_NS` | `gatekeeper-test` (default is fine) |
+
+---
+
+### 4. Pulumi — config variables per stage
+
+All stages share a Pulumi stack per environment. Run these before `pulumi up` for each stage.
+
+```bash
+cd infra
+npm install
+az login
+pulumi login   # or: export PULUMI_ACCESS_TOKEN=<token>
+```
+
+#### Stage 1
+
+```bash
+pulumi stack init stage1
+pulumi config set location    uksouth          # Azure region
+pulumi config set env         demo
+```
+
+#### Stage 2
+
+```bash
+pulumi stack init stage2
+pulumi config set location       uksouth
+pulumi config set env            demo
+pulumi config set publisherEmail you@yourorg.com   # APIM publisher contact
+pulumi config set publisherName  "Your Team Name"
+# Optional overrides:
+pulumi config set nodeVmSize  Standard_D4ds_v5
+pulumi config set nodeCount   3
+```
+
+#### Stage 3
+
+```bash
+pulumi stack init stage3
+pulumi config set pulumiOrg   YOUR_PULUMI_ORG   # your Pulumi Cloud organisation slug
+pulumi config set env         demo
+```
+
+#### Stage 4
+
+```bash
+pulumi stack init stage4
+pulumi config set pulumiOrg      YOUR_PULUMI_ORG
+pulumi config set env            demo
+pulumi config set gitOrg         YOUR_GITHUB_ORG
+pulumi config set gitRepo        azure-microservices-gitops
+pulumi config set tenantId       YOUR_ENTRA_TENANT_ID
+pulumi config set argoCdClientId YOUR_ARGOCD_APP_CLIENT_ID
+```
+
+---
+
+### 5. Deploy — stage by stage
+
+#### Stage 1 (optional monolith demo)
+
+```bash
+# In infra/Pulumi.yaml, set:  main: stage1.ts
+pulumi up --stack stage1
+```
+
+#### Stage 2 — AKS platform (required for all later stages)
+
+```bash
+# Set main: stage2.ts in Pulumi.yaml
+pulumi up --stack stage2
+
+# Save cluster credentials
+az aks get-credentials \
+  --resource-group rg-microservices-stage2-demo \
+  --name aks-stage2-demo
+```
+
+#### Install Actions Runner Controller (ARC) on AKS
+
+The CI pipeline requires self-hosted runners on AKS. Install ARC after Stage 2:
+
+```bash
+# Install the controller
+helm install arc \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
+  --namespace arc-systems --create-namespace
+
+# Install a runner scale set (replace ORG and PAT)
+helm install arc-runners \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
+  --namespace arc-runners --create-namespace \
+  --set githubConfigUrl="https://github.com/YOUR_ORG/azure-microservices-gitops" \
+  --set githubConfigSecret.github_token="YOUR_GITOPS_PAT"
+```
+
+#### Stage 3 — Dapr, KEDA, Prometheus
+
+```bash
+# Set main: stage3.ts
+pulumi up --stack stage3
+```
+
+#### Stage 4 — ArgoCD, Gatekeeper, OTel
+
+```bash
+# Set main: stage4.ts
+pulumi up --stack stage4
+```
+
+Stage 4 bootstraps ArgoCD and applies the app-of-apps manifest automatically. After it completes, ArgoCD takes ownership of all Helm releases in `argocd/apps/`.
+
+#### Store ArgoCD SSO client secret
+
+```bash
+kubectl create secret generic argocd-azure-secret \
+  --from-literal=oidc.azure.clientSecret=YOUR_ARGOCD_CLIENT_SECRET \
+  -n argocd
+```
+
+#### Create a CI service account token for ArgoCD
+
+```bash
+# Add a CI account to ArgoCD, generate a token, then save it as the ARGOCD_AUTH_TOKEN GitHub secret
+argocd account generate-token --account ci
+```
+
+---
+
+### 6. Validate
+
+```bash
+# All ArgoCD apps should be Healthy + Synced
+argocd app list
+
+# Smoke test through APIM (requires Stage 2+)
+k6 run \
+  --env APIM_GATEWAY=$(pulumi stack output apimGatewayUrl --stack stage2) \
+  --env APIM_KEY=YOUR_SUBSCRIPTION_KEY \
+  tests/k6/smoke.js
+```
+
+---
+
 ## Deployment
 
 ### Stage 1 — Monolith Foundation

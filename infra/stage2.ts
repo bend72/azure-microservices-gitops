@@ -6,11 +6,13 @@ import * as random from "@pulumi/random";
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
-const cfg = new pulumi.Config();
-const location   = cfg.get("location") ?? "uksouth";
-const env        = cfg.get("env")      ?? "demo";
-const nodeVmSize = cfg.get("nodeVmSize") ?? "Standard_D4ds_v5";
-const nodeCount  = cfg.getNumber("nodeCount") ?? 3;
+const cfg            = new pulumi.Config();
+const location       = cfg.get("location")       ?? "uksouth";
+const env            = cfg.get("env")            ?? "demo";
+const nodeVmSize     = cfg.get("nodeVmSize")     ?? "Standard_D4ds_v5";
+const nodeCount      = cfg.getNumber("nodeCount") ?? 3;
+const publisherEmail = cfg.get("publisherEmail") ?? "platform@example.com";
+const publisherName  = cfg.get("publisherName")  ?? "Platform Team";
 
 // ---------------------------------------------------------------------------
 // Resource Group
@@ -320,8 +322,8 @@ const apim = new azure_native.apimanagement.ApiManagementService("apim", {
   location,
   serviceName: `apim-stage2-${env}`,
   sku: { name: "Developer", capacity: 1 },
-  publisherEmail: "platform@contoso.com",
-  publisherName: "Contoso Platform Team",
+  publisherEmail,
+  publisherName,
   virtualNetworkType: "External",
   virtualNetworkConfiguration: { subnetResourceId: apimSubnet.id },
   publicIpAddressId: apimPublicIp.id,

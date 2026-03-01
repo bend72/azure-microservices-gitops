@@ -30,9 +30,12 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ACR_LOGIN_SERVER: acrstage2demo.azurecr.io
-  ARGOCD_SERVER:    argocd.contoso-demo.internal
-  GATEKEEPER_TEST_NS: gatekeeper-test
+  # Set ACR_LOGIN_SERVER and ARGOCD_SERVER as GitHub repository variables
+  # (Settings → Secrets and variables → Actions → Variables) so you don't
+  # need to edit this file per environment.
+  ACR_LOGIN_SERVER:   ${{ vars.ACR_LOGIN_SERVER   || 'acrstage2demo.azurecr.io' }}
+  ARGOCD_SERVER:      ${{ vars.ARGOCD_SERVER       || 'argocd.contoso-demo.internal' }}
+  GATEKEEPER_TEST_NS: ${{ vars.GATEKEEPER_TEST_NS  || 'gatekeeper-test' }}
   # Root of the eShopOnDapr submodule
   ESHOP_ROOT: src/eshop-on-dapr/src/Services
 
