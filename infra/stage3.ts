@@ -156,11 +156,31 @@ const keda = new k8s.helm.v3.Release("keda", {
   },
 }, { provider: k8sProvider, dependsOn: [kedaNs] });
 
-// KEDA ScaledObjects — one per service, driven by Service Bus topic message count
+// KEDA ScaledObjects — one per service, one trigger per subscription it consumes.
+//
+// stage2.ts creates fan-out subscriptions named "{subscriber}-reads-{publisher}"
+// on each "{publisher}-events" topic.  Each service consumes from every other
+// service's topic, so a service with N peers has N triggers.  KEDA scales the
+// deployment up when ANY trigger's message count exceeds the threshold.
 const services = ["catalog", "ordering", "basket", "identity", "payment", "notification"];
 
-const kedaScaledObjects = services.map(svc =>
-  new k8s.apiextensions.CustomResource(`keda-so-${svc}`, {
+const kedaScaledObjects = services.map(svc => {
+  // The topics this service subscribes to are all topics published by other services.
+  const publishers = services.filter(p => p !== svc);
+
+  const triggers = publishers.map(publisher => ({
+    type: "azure-servicebus",
+    metadata: {
+      topicName:              `${publisher}-events`,
+      subscriptionName:       `${svc}-reads-${publisher}`,   // matches stage2.ts naming
+      namespace:              serviceBusNs.apply(n => String(n)),
+      messageCount:           "10",
+      activationMessageCount: "1",
+    },
+    authenticationRef: { name: "keda-sb-auth" },
+  }));
+
+  return new k8s.apiextensions.CustomResource(`keda-so-${svc}`, {
     apiVersion: "keda.sh/v1alpha1",
     kind:       "ScaledObject",
     metadata: {
@@ -177,20 +197,10 @@ const kedaScaledObjects = services.map(svc =>
       cooldownPeriod:   60,
       minReplicaCount:  1,
       maxReplicaCount:  20,
-      triggers: [{
-        type: "azure-servicebus",
-        metadata: {
-          topicName:            `${svc}-events`,
-          subscriptionName:     `${svc}-reads-${svc}`,
-          namespace:            serviceBusNs.apply(n => String(n)),
-          messageCount:         "10",
-          activationMessageCount: "1",
-        },
-        authenticationRef: { name: "keda-sb-auth" },
-      }],
+      triggers,
     },
-  }, { provider: k8sProvider, dependsOn: [keda] })
-);
+  }, { provider: k8sProvider, dependsOn: [keda] });
+});
 
 // TriggerAuthentication for KEDA → Service Bus via workload identity
 const kedaTriggerAuth = new k8s.apiextensions.CustomResource("keda-sb-auth", {
