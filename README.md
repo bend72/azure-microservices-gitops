@@ -288,20 +288,44 @@ Set these in the repo's **Settings → Secrets and variables → Actions**:
 
 ---
 
+## Source Application Repositories
+
+This GitOps repo is the **platform layer** — it defines how services are deployed, scaled, and observed. The actual application code lives in separate repos:
+
+| Stage | App | Source | Notes |
+|---|---|---|---|
+| 1 | ASP.NET Monolith | [eShopModernizing](https://github.com/dotnet-architecture/eShopModernizing) | Deploy the containerised variant to App Service |
+| 2–3 | 7 Microservices | [eShopOnDapr](https://github.com/dotnet-architecture/eShopOnDapr) | .NET 8 services built on Dapr pub/sub — maps directly to the catalog/ordering/basket/identity/payment/notification structure used here |
+
+**eShopOnDapr service → namespace mapping:**
+
+| eShopOnDapr service | This platform's namespace | Data store |
+|---|---|---|
+| `catalog-api` | `catalog` | Cosmos DB |
+| `basket-api` | `basket` | Cosmos DB |
+| `ordering-api` | `ordering` | Azure SQL |
+| `payment-api` | `payment` | Azure SQL |
+| `identity-api` | `identity` | Stateless |
+| `notification` (webhooks) | `notification` | Stateless |
+
+For CI to work, place each service's source under `src/<namespace>/` (e.g. `src/catalog/`) with a distroless multi-stage `Dockerfile`. The CI workflow detects which directories changed and builds only the affected services.
+
+---
+
 ## Current Status
 
 | Component | Status | Notes |
 |---|---|---|
 | `infra/stage1.ts` | ✅ Complete | App Service + SQL monolith |
 | `infra/stage2.ts` | ✅ Complete | AKS + all data services |
-| `infra/stage3.ts` | ✅ Complete | Dapr, KEDA, Prometheus |
+| `infra/stage3.ts` | ✅ Complete | Dapr, KEDA, Prometheus — KEDA subscription names fixed |
 | `infra/stage4.ts` | ✅ Complete | ArgoCD, Gatekeeper, OTel |
 | `helm/infrastructure` | ✅ Complete | NGINX, cert-manager, Image Updater |
-| `helm/services/catalog` | ✅ Complete | Reference chart |
-| `helm/services/{ordering,basket,...}` | ⬜ Not started | Copy and adapt from catalog |
-| `helm/monitoring` | ⬜ Not started | Referenced by ArgoCD; Prometheus currently deployed via Pulumi |
+| `helm/services/catalog` | ✅ Complete | Reference chart (helpers bug fixed) |
+| `helm/services/{ordering,basket,payment,identity,notification}` | ✅ Complete | All 5 created with correct per-service DB config |
+| `helm/monitoring` | ⬜ Not started | Referenced by ArgoCD; Prometheus currently deployed via Pulumi stage3 |
 | `backstage/skeleton` | ⬜ Not started | Required for Software Template to function |
-| `src/` (microservice code) | ⬜ Not started | Placeholder services needed for CI |
+| `src/` (microservice code) | ⬜ Not started | eShopOnDapr services go here; needed for CI |
 | `.github/workflows/ci.yaml` | ✅ Complete | Requires `src/` to exist |
 | `tests/k6/smoke.js` | ✅ Complete | Requires running Stage 2+ |
 
@@ -309,7 +333,6 @@ Set these in the repo's **Settings → Secrets and variables → Actions**:
 
 ## Known Issues
 
-- **KEDA subscription names (stage3.ts):** ScaledObjects trigger on `{svc}-reads-{svc}` subscriptions, but `stage2.ts` creates fan-out subscriptions named `{subscriber}-reads-{publisher}`. These names don't match — KEDA autoscaling won't activate until `stage3.ts` is updated to reference the correct subscription names.
 - **Placeholder values:** `argocd/apps/*.yaml` contains `GITORG/GITREPO` placeholders. Replace with your GitHub organisation and repository name before deploying Stage 4.
 - **Service Bus tier:** `stage2.ts` provisions Service Bus Premium (~$700/month). Downgrade to Standard for non-production demo environments.
 - **Helm values overlay:** ArgoCD app manifests reference `values-demo.yaml` per service. These files don't exist yet — create them for environment-specific overrides or remove the reference.
