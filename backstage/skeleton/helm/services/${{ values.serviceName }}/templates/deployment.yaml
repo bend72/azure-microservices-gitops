@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "${{ values.serviceName }}.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "${{ values.serviceName }}.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "${{ values.serviceName }}.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "${{ values.serviceName }}.selectorLabels" . | nindent 8 }}
+        azure.workload.identity/use: "true"
+      annotations:
+        dapr.io/enabled:           "{{ .Values.dapr.enabled }}"
+        dapr.io/app-id:            "{{ .Values.dapr.appId }}"
+        dapr.io/app-port:          "{{ .Values.dapr.appPort }}"
+        dapr.io/log-level:         "{{ .Values.dapr.logLevel }}"
+        dapr.io/enable-api-logging: "{{ .Values.dapr.enableApiLogging }}"
+        instrumentation.opentelemetry.io/inject-dotnet: "true"
+    spec:
+      serviceAccountName: {{ include "${{ values.serviceName }}.fullname" . }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: Production
+            - name: ASPNETCORE_URLS
+              value: http://+:{{ .Values.service.targetPort }}
+            - name: OtelEndpoint
+              value: {{ .Values.otel.endpoint }}
+            {{- if .Values.cosmos }}
+            - name: CosmosDb__DatabaseName
+              value: {{ .Values.cosmos.databaseName }}
+            - name: CosmosDb__ContainerName
+              value: {{ .Values.cosmos.containerName }}
+            - name: CosmosDb__ConnectionString
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Chart.Name }}-secrets
+                  key: CosmosDb--ConnectionString
+            {{- end }}
+            {{- if .Values.sql }}
+            - name: Sql__DatabaseName
+              value: {{ .Values.sql.databaseName }}
+            - name: Sql__ConnectionString
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Chart.Name }}-secrets
+                  key: Sql--ConnectionString
+            {{- end }}
+            - name: ServiceBus__ConnectionString
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Chart.Name }}-secrets
+                  key: ServiceBus--ConnectionString
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,59 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: ${{ values.serviceName }}
+  title: ${{ values.serviceName | title }}
+  description: ${{ values.serviceDescription }}
+  annotations:
+    backstage.io/managed-by-location: url:https://github.com/${{ values.gitOrg }}/${{ values.gitRepo }}/blob/main/catalog-info.yaml
+    github.com/project-slug: ${{ values.gitOrg }}/${{ values.gitRepo }}
+    argocd/app-name: ${{ values.serviceName }}
+    prometheus.io/rule: |
+      sum(rate(http_requests_total{app="${{ values.serviceName }}"}[5m]))
+  tags:
+    - dotnet
+    - azure
+    - aks
+    - dapr
+    {% if values.databaseType == "cosmos" %}- cosmos{% endif %}
+    {% if values.databaseType == "sql" %}- azure-sql{% endif %}
+
+spec:
+  type: service
+  lifecycle: ${{ values.lifecycle }}
+  owner: ${{ values.owner }}
+  system: eshop-demo-platform
+
+  providesApis:
+    - ${{ values.serviceName }}-api
+
+  {% if values.subscribesTo | length > 0 %}
+  consumesApis:
+    {% for svc in values.subscribesTo %}
+    - {{ svc }}-api
+    {% endfor %}
+  {% endif %}
+
+  dependsOn:
+    {% if values.databaseType == "cosmos" %}
+    - resource:cosmos-${{ values.serviceName }}
+    {% elif values.databaseType == "sql" %}
+    - resource:sql-${{ values.serviceName }}
+    {% endif %}
+    - component:identity
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: ${{ values.serviceName }}-api
+  description: REST API for ${{ values.serviceName }} service
+  annotations:
+    backstage.io/managed-by-location: url:https://github.com/${{ values.gitOrg }}/${{ values.gitRepo }}/blob/main/catalog-info.yaml
+spec:
+  type: openapi
+  lifecycle: ${{ values.lifecycle }}
+  owner: ${{ values.owner }}
+  system: eshop-demo-platform
+  definition:
+    $text: https://github.com/${{ values.gitOrg }}/${{ values.gitRepo }}/blob/main/src/${{ values.serviceName }}/openapi.yaml

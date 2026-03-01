@@ -1,0 +1,20 @@
+# ── helm/monitoring/Chart.yaml ────────────────────────────────────────────────
+# Umbrella chart — wraps kube-prometheus-stack so ArgoCD can manage the
+# monitoring stack from this GitOps repo.
+#
+# Stage 3 deploys the same stack via Pulumi (stage3.ts).  Once Stage 4 ArgoCD
+# is running, ArgoCD takes ownership and Pulumi should no longer manage it.
+# To migrate: run `pulumi state delete` for the kube-prometheus-stack resource
+# in the stage3 stack, then let ArgoCD apply this chart.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v2
+name: monitoring
+description: kube-prometheus-stack umbrella — Prometheus, Grafana, Node Exporter, kube-state-metrics
+type: application
+version: 0.1.0
+appVersion: "58.6.0"
+
+dependencies:
+  - name: kube-prometheus-stack
+    version: "58.6.0"
+    repository: https://prometheus-community.github.io/helm-charts

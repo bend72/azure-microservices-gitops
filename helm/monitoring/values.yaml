@@ -1,0 +1,73 @@
+# ── helm/monitoring/values.yaml ───────────────────────────────────────────────
+# Values for kube-prometheus-stack 58.6.0 — matches stage3.ts Pulumi config.
+# Sub-chart values are prefixed with the chart name.
+# ─────────────────────────────────────────────────────────────────────────────
+
+kube-prometheus-stack:
+
+  # ── Prometheus ──────────────────────────────────────────────────────────────
+  prometheus:
+    prometheusSpec:
+      retention: 7d
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            accessModes: [ReadWriteOnce]
+            resources:
+              requests:
+                storage: 20Gi
+
+      # Scrape Dapr metrics sidecar on port 9090
+      additionalScrapeConfigs:
+        - job_name: dapr
+          kubernetes_sd_configs:
+            - role: pod
+          relabel_configs:
+            - source_labels: [__meta_kubernetes_pod_annotation_dapr_io_enabled]
+              action: keep
+              regex: "true"
+            - source_labels: [__meta_kubernetes_pod_ip]
+              target_label: __address__
+              replacement: "$1:9090"
+
+  # ── Grafana ─────────────────────────────────────────────────────────────────
+  grafana:
+    enabled: true
+    adminPassword: demo-admin   # override via KV secret in production
+
+    service:
+      type: ClusterIP
+
+    dashboardProviders:
+      dashboardproviders.yaml:
+        apiVersion: 1
+        providers:
+          - name: default
+            orgId: 1
+            folder: Microservices
+            type: file
+            disableDeletion: false
+            options:
+              path: /var/lib/grafana/dashboards/default
+
+    dashboards:
+      default:
+        dapr-system:
+          gnetId: 17843
+          revision: 1
+          datasource: Prometheus
+        keda-metrics:
+          gnetId: 14888
+          revision: 1
+          datasource: Prometheus
+
+  # ── Alertmanager ─────────────────────────────────────────────────────────────
+  alertmanager:
+    enabled: false   # enable and configure receivers for production
+
+  # ── Exporters ────────────────────────────────────────────────────────────────
+  prometheus-node-exporter:
+    enabled: true
+
+  kube-state-metrics:
+    enabled: true

@@ -158,8 +158,9 @@ const sbNamespace = new azure_native.servicebus.Namespace("sb-ns", {
   resourceGroupName: rg.name,
   location,
   namespaceName: `sb-stage2-${env}`,
-  sku: { name: "Premium", tier: "Premium", capacity: 1 },
-  zoneRedundant: false,
+  // Standard tier (~$10/month) is sufficient for demo; upgrade to Premium for
+  // private endpoints and zone redundancy in production.
+  sku: { name: "Standard", tier: "Standard" },
 });
 
 const sbTopics = services.map(svc => {
@@ -381,7 +382,8 @@ const peCatalogCosmos = privateEndpoint("cosmos-catalog", catalogCosmos.acct.id,
 const peBasketCosmos  = privateEndpoint("cosmos-basket",  basketCosmos.acct.id,  "Sql");
 const peSqlServer     = privateEndpoint("sql-server",     sqlServer.id,           "sqlServer");
 const peKv            = privateEndpoint("kv",             kv.id,                  "vault");
-const peSb            = privateEndpoint("servicebus",     sbNamespace.id,         "namespace");
+// NOTE: Service Bus Standard tier does not support private endpoints.
+// For production (Premium tier), add: privateEndpoint("servicebus", sbNamespace.id, "namespace")
 
 // ---------------------------------------------------------------------------
 // Outputs

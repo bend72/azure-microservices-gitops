@@ -23,7 +23,7 @@ metadata:
 spec:
   project: microservices
   source:
-    repoURL: https://github.com/GITORG/GITREPO
+    repoURL: https://github.com/bend72/azure-microservices-gitops
     targetRevision: main
     path: helm/services/catalog
     helm:
@@ -68,7 +68,7 @@ metadata:
 spec:
   project: microservices
   source:
-    repoURL: https://github.com/GITORG/GITREPO
+    repoURL: https://github.com/bend72/azure-microservices-gitops
     targetRevision: main
     path: helm/services/ordering
     helm:
@@ -104,7 +104,7 @@ metadata:
 spec:
   project: microservices
   source:
-    repoURL: https://github.com/GITORG/GITREPO
+    repoURL: https://github.com/bend72/azure-microservices-gitops
     targetRevision: main
     path: helm/services/basket
     helm:
@@ -137,7 +137,7 @@ metadata:
 spec:
   project: microservices
   source:
-    repoURL: https://github.com/GITORG/GITREPO
+    repoURL: https://github.com/bend72/azure-microservices-gitops
     targetRevision: main
     path: helm/services/identity
     helm:
@@ -166,7 +166,7 @@ metadata:
 spec:
   project: microservices
   source:
-    repoURL: https://github.com/GITORG/GITREPO
+    repoURL: https://github.com/bend72/azure-microservices-gitops
     targetRevision: main
     path: helm/services/payment
     helm:
@@ -199,7 +199,7 @@ metadata:
 spec:
   project: microservices
   source:
-    repoURL: https://github.com/GITORG/GITREPO
+    repoURL: https://github.com/bend72/azure-microservices-gitops
     targetRevision: main
     path: helm/services/notification
     helm:

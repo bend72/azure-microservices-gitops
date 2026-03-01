@@ -16,7 +16,7 @@ metadata:
 spec:
   project: platform
   source:
-    repoURL: https://github.com/GITORG/GITREPO
+    repoURL: https://github.com/bend72/azure-microservices-gitops
     targetRevision: main
     path: helm/infrastructure
   destination:

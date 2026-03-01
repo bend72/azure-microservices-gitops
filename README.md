@@ -326,22 +326,23 @@ git submodule update --init --recursive
 | Component | Status | Notes |
 |---|---|---|
 | `infra/stage1.ts` | ✅ Complete | App Service + SQL monolith |
-| `infra/stage2.ts` | ✅ Complete | AKS + all data services |
+| `infra/stage2.ts` | ✅ Complete | AKS + all data services; Service Bus Standard tier |
 | `infra/stage3.ts` | ✅ Complete | Dapr, KEDA, Prometheus — KEDA subscription names fixed |
 | `infra/stage4.ts` | ✅ Complete | ArgoCD, Gatekeeper, OTel |
 | `helm/infrastructure` | ✅ Complete | NGINX, cert-manager, Image Updater |
 | `helm/services/catalog` | ✅ Complete | Reference chart (helpers bug fixed) |
 | `helm/services/{ordering,basket,payment,identity,notification}` | ✅ Complete | All 5 created with correct per-service DB config |
-| `helm/monitoring` | ⬜ Not started | Referenced by ArgoCD; Prometheus currently deployed via Pulumi stage3 |
-| `backstage/skeleton` | ⬜ Not started | Required for Software Template to function |
-| `src/` (microservice code) | ⬜ Not started | eShopOnDapr services go here; needed for CI |
-| `.github/workflows/ci.yaml` | ✅ Complete | Requires `src/` to exist |
+| `helm/services/*/values-demo.yaml` | ✅ Complete | Demo environment overrides for all 6 services |
+| `helm/monitoring` | ✅ Complete | kube-prometheus-stack umbrella chart for ArgoCD |
+| `backstage/skeleton` | ✅ Complete | Helm chart + ArgoCD app + catalog-info Nunjucks templates |
+| `argocd/apps/*.yaml` | ✅ Complete | Repo URL set to `bend72/azure-microservices-gitops` |
+| `src/` (microservice code) | ⬜ Submodules | eShopOnDapr populated via `git submodule update --init --recursive` |
+| `.github/workflows/ci.yaml` | ✅ Complete | Builds from eShopOnDapr submodule paths |
 | `tests/k6/smoke.js` | ✅ Complete | Requires running Stage 2+ |
 
 ---
 
 ## Known Issues
 
-- **Placeholder values:** `argocd/apps/*.yaml` contains `GITORG/GITREPO` placeholders. Replace with your GitHub organisation and repository name before deploying Stage 4.
-- **Service Bus tier:** `stage2.ts` provisions Service Bus Premium (~$700/month). Downgrade to Standard for non-production demo environments.
-- **Helm values overlay:** ArgoCD app manifests reference `values-demo.yaml` per service. These files don't exist yet — create them for environment-specific overrides or remove the reference.
+- **Prometheus ownership:** Stage 3 Pulumi and the `helm/monitoring` ArgoCD chart both manage kube-prometheus-stack. When migrating to Stage 4, run `pulumi state delete` on the `kube-prometheus-stack` resource in the stage3 stack before letting ArgoCD apply `helm/monitoring`.
+- **Grafana password:** `grafana.adminPassword` is set to `demo-admin` in `helm/monitoring/values.yaml`. Store the real password in Key Vault and inject it via a Kubernetes Secret for production use.

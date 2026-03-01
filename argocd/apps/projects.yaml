@@ -11,7 +11,7 @@ metadata:
 spec:
   description: Platform infrastructure managed by platform engineers
   sourceRepos:
-    - https://github.com/GITORG/GITREPO
+    - https://github.com/bend72/azure-microservices-gitops
     - https://prometheus-community.github.io/helm-charts
     - https://charts.jetstack.io
     - https://kubernetes.github.io/ingress-nginx
@@ -41,7 +41,7 @@ metadata:
 spec:
   description: Microservice workloads — dev teams have deploy rights to their own namespace only
   sourceRepos:
-    - https://github.com/GITORG/GITREPO
+    - https://github.com/bend72/azure-microservices-gitops
   destinations:
     - namespace: catalog
       server: https://kubernetes.default.svc

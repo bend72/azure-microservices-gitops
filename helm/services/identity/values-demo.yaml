@@ -1,0 +1,20 @@
+# ── helm/services/identity/values-demo.yaml ──────────────────────────────────
+# Demo-environment overrides — applied on top of values.yaml by ArgoCD.
+# identity is stateless — no DB connection string to override.
+# ─────────────────────────────────────────────────────────────────────────────
+
+global:
+  env: demo
+
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+podDisruptionBudget:
+  enabled: false

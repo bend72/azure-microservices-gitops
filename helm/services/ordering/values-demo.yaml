@@ -1,0 +1,19 @@
+# ── helm/services/ordering/values-demo.yaml ──────────────────────────────────
+# Demo-environment overrides — applied on top of values.yaml by ArgoCD.
+# ─────────────────────────────────────────────────────────────────────────────
+
+global:
+  env: demo
+
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+podDisruptionBudget:
+  enabled: false

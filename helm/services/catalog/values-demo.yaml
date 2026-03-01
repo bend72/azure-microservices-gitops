@@ -1,0 +1,20 @@
+# ── helm/services/catalog/values-demo.yaml ───────────────────────────────────
+# Demo-environment overrides — applied on top of values.yaml by ArgoCD.
+# Keep this file minimal: only values that differ from the defaults.
+# ─────────────────────────────────────────────────────────────────────────────
+
+global:
+  env: demo
+
+replicaCount: 1   # KEDA owns scale-out; 1 is the cold-start baseline
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+podDisruptionBudget:
+  enabled: false   # minAvailable: 1 with replicaCount: 1 blocks node maintenance

@@ -1,0 +1,13 @@
+# ── helm/services/notification/values-demo.yaml ──────────────────────────────
+# Demo-environment overrides — applied on top of values.yaml by ArgoCD.
+# notification is stateless — delivers webhook events, no DB.
+# ─────────────────────────────────────────────────────────────────────────────
+
+global:
+  env: demo
+
+replicaCount: 1
+
+# notification already has low defaults (50m/64Mi); keep them
+podDisruptionBudget:
+  enabled: false
