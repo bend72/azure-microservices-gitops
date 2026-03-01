@@ -17,3 +17,8 @@ resources:
 
 podDisruptionBudget:
   enabled: false
+
+azure:
+  keyVaultName: kv-stage2-demo   # matches Pulumi stage2 output for env=demo
+  tenantId: ""                    # SET THIS before deploying Stage 4
+                                  # az account show --query tenantId -o tsv

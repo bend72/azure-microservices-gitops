@@ -40,6 +40,16 @@ dapr:
 
 otel:
   endpoint: http://otel-collector-collector.opentelemetry.svc.cluster.local:4317
+  # Creates an Instrumentation CR in this namespace so OTel operator can inject
+  # the .NET SDK — must be true for distributed tracing to work (Stage 4+)
+  createInstrumentation: true
+
+azure:
+  # Key Vault name created by Pulumi stage2: kv-stage2-${env}
+  keyVaultName: kv-stage2-demo
+  # Your Entra ID tenant ID — REQUIRED before deploying
+  # Obtain with: az account show --query tenantId -o tsv
+  tenantId: ""
 
 cosmos:
   # Injected at runtime from KV via CSI driver

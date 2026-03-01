@@ -38,6 +38,11 @@ dapr:
 
 otel:
   endpoint: http://otel-collector-collector.opentelemetry.svc.cluster.local:4317
+  createInstrumentation: true
+
+azure:
+  keyVaultName: kv-stage2-demo
+  tenantId: ""   # REQUIRED: az account show --query tenantId -o tsv
 
 # Cosmos DB (serverless) — basket data store
 cosmos:

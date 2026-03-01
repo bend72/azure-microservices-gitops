@@ -298,7 +298,41 @@ argocd account generate-token --account ci
 
 ---
 
-### 6. Validate
+### 6. Set your Entra tenant ID in the ArgoCD app manifests
+
+Before ArgoCD can sync the Helm charts, the CSI Secrets Store driver needs your Entra tenant ID to connect to Key Vault. Edit `argocd/apps/catalog.yaml` and replace the six empty `azure.tenantId` parameters with your actual tenant ID:
+
+```bash
+TENANT_ID=$(az account show --query tenantId -o tsv)
+
+# Update all six service Application manifests in one go
+sed -i "s|value: \"\"   # REQUIRED — replace with your Entra tenant ID.*|value: \"${TENANT_ID}\"|g" \
+  argocd/apps/catalog.yaml
+
+git add argocd/apps/catalog.yaml
+git commit -m "chore: set azure.tenantId for demo environment"
+git push
+```
+
+ArgoCD will pick up the change within 3 minutes and re-render the Helm charts with the correct tenant ID.
+
+---
+
+### 7. Pin npm dependencies (reproducible Pulumi builds)
+
+The `infra/package.json` uses caret ranges (`^3`, `^2`). Pin exact versions by committing the lock file:
+
+```bash
+cd infra
+npm install
+git add package-lock.json
+git commit -m "chore: commit package-lock.json for reproducible Pulumi builds"
+git push
+```
+
+---
+
+### 8. Validate
 
 ```bash
 # All ArgoCD apps should be Healthy + Synced

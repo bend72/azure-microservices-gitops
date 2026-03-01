@@ -35,6 +35,8 @@ spec:
           value: demo
         - name: otel.endpoint
           value: http://otel-collector-collector.opentelemetry.svc.cluster.local:4317
+        - name: azure.tenantId
+          value: ""   # REQUIRED — replace with your Entra tenant ID before applying
   destination:
     server: https://kubernetes.default.svc
     namespace: catalog
@@ -76,6 +78,8 @@ spec:
       parameters:
         - name: global.env
           value: demo
+        - name: azure.tenantId
+          value: ""   # REQUIRED — replace with your Entra tenant ID before applying
   destination:
     server: https://kubernetes.default.svc
     namespace: ordering
@@ -109,6 +113,9 @@ spec:
     path: helm/services/basket
     helm:
       valueFiles: [values.yaml, values-demo.yaml]
+      parameters:
+        - name: azure.tenantId
+          value: ""   # REQUIRED — replace with your Entra tenant ID before applying
   destination:
     server: https://kubernetes.default.svc
     namespace: basket
@@ -142,6 +149,9 @@ spec:
     path: helm/services/identity
     helm:
       valueFiles: [values.yaml, values-demo.yaml]
+      parameters:
+        - name: azure.tenantId
+          value: ""   # REQUIRED — replace with your Entra tenant ID before applying
   destination:
     server: https://kubernetes.default.svc
     namespace: identity
@@ -171,6 +181,9 @@ spec:
     path: helm/services/payment
     helm:
       valueFiles: [values.yaml, values-demo.yaml]
+      parameters:
+        - name: azure.tenantId
+          value: ""   # REQUIRED — replace with your Entra tenant ID before applying
   destination:
     server: https://kubernetes.default.svc
     namespace: payment
@@ -204,6 +217,9 @@ spec:
     path: helm/services/notification
     helm:
       valueFiles: [values.yaml, values-demo.yaml]
+      parameters:
+        - name: azure.tenantId
+          value: ""   # REQUIRED — replace with your Entra tenant ID before applying
   destination:
     server: https://kubernetes.default.svc
     namespace: notification
