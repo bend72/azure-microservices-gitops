@@ -588,7 +588,7 @@ git submodule update --init --recursive
 | `src/eshop-on-dapr/src/Services/Identity.API` | `identity` | Stateless |
 | `src/eshop-on-dapr/src/Services/Webhooks.API` | `notification` | Stateless |
 
-> **CI note:** The CI workflow expects Dockerfiles at `src/<service>/Dockerfile`. eShopOnDapr services live deeper in the submodule tree. Either add per-service symlinks at the `src/` level or update the `file:` path in `.github/workflows/ci.yaml` to point into the submodule (e.g. `src/eshop-on-dapr/src/Services/Catalog.API/Dockerfile`).
+> **CI note:** The workflow resolves each service name to its full submodule path (e.g. `catalog` → `src/eshop-on-dapr/src/Services/Catalog.API`) before running Docker build. No symlinks or manual path edits are required.
 
 ---
 
@@ -596,20 +596,23 @@ git submodule update --init --recursive
 
 | Component | Status | Notes |
 |---|---|---|
-| `infra/stage1.ts` | ✅ Complete | App Service + SQL monolith |
-| `infra/stage2.ts` | ✅ Complete | AKS + all data services; Service Bus Standard tier |
-| `infra/stage3.ts` | ✅ Complete | Dapr, KEDA, Prometheus — KEDA subscription names fixed |
-| `infra/stage4.ts` | ✅ Complete | ArgoCD, Gatekeeper, OTel |
-| `helm/infrastructure` | ✅ Complete | NGINX, cert-manager, Image Updater |
-| `helm/services/catalog` | ✅ Complete | Reference chart (helpers bug fixed) |
-| `helm/services/{ordering,basket,payment,identity,notification}` | ✅ Complete | All 5 created with correct per-service DB config |
-| `helm/services/*/values-demo.yaml` | ✅ Complete | Demo environment overrides for all 6 services |
-| `helm/monitoring` | ✅ Complete | kube-prometheus-stack umbrella chart for ArgoCD |
+| `infra/stage1.ts` | ✅ Complete | App Service + SQL monolith; APIM publisher configurable via Pulumi config |
+| `infra/stage2.ts` | ✅ Complete | AKS + all data services; Service Bus Standard tier (cost-optimised) |
+| `infra/stage3.ts` | ✅ Complete | Dapr, KEDA, Prometheus; Pulumi org read from `pulumiOrg` config |
+| `infra/stage4.ts` | ✅ Complete | ArgoCD, Gatekeeper, OTel; SSO tenant/clientId read from config |
+| `infra/package.json` | ⚠️ Action needed | Commit `package-lock.json` after `npm install` for reproducible builds |
+| `helm/infrastructure` | ✅ Complete | NGINX, cert-manager, ArgoCD Image Updater |
+| `helm/services/catalog` | ✅ Complete | Reference chart; serviceaccount, instrumentation templates added |
+| `helm/services/{ordering,basket,payment,identity,notification}` | ✅ Complete | All 5 charts; serviceaccount + OTel instrumentation templates added |
+| `helm/services/*/values.yaml` | ✅ Complete | `azure.keyVaultName` + `azure.tenantId` fields; `otel.createInstrumentation` |
+| `helm/services/*/values-demo.yaml` | ⚠️ Action needed | Set `azure.tenantId` before deploying (see How to Deploy step 6) |
+| `helm/monitoring` | ✅ Complete | kube-prometheus-stack 58.6.0 umbrella chart for ArgoCD |
 | `backstage/skeleton` | ✅ Complete | Helm chart + ArgoCD app + catalog-info Nunjucks templates |
-| `argocd/apps/*.yaml` | ✅ Complete | Repo URL set to `bend72/azure-microservices-gitops` |
-| `src/` (microservice code) | ⬜ Submodules | eShopOnDapr populated via `git submodule update --init --recursive` |
-| `.github/workflows/ci.yaml` | ✅ Complete | Builds from eShopOnDapr submodule paths |
-| `tests/k6/smoke.js` | ✅ Complete | Requires running Stage 2+ |
+| `argocd/apps/catalog.yaml` | ⚠️ Action needed | Set `azure.tenantId` parameter for all 6 service apps (see step 6) |
+| `argocd/apps/{infrastructure,monitoring,projects}.yaml` | ✅ Complete | Repo URL set to `bend72/azure-microservices-gitops` |
+| `src/` (microservice code) | ⬜ Submodules | Populate with `git submodule update --init --recursive` |
+| `.github/workflows/ci.yaml` | ✅ Complete | Builds from eShopOnDapr submodule paths; ACR/ArgoCD URLs via GitHub vars |
+| `tests/k6/smoke.js` | ✅ Complete | Smoke/load/soak scenarios; requires Stage 2+ running |
 
 ---
 
@@ -617,3 +620,4 @@ git submodule update --init --recursive
 
 - **Prometheus ownership:** Stage 3 Pulumi and the `helm/monitoring` ArgoCD chart both manage kube-prometheus-stack. When migrating to Stage 4, run `pulumi state delete` on the `kube-prometheus-stack` resource in the stage3 stack before letting ArgoCD apply `helm/monitoring`.
 - **Grafana password:** `grafana.adminPassword` is set to `demo-admin` in `helm/monitoring/values.yaml`. Store the real password in Key Vault and inject it via a Kubernetes Secret for production use.
+- **Tenant ID:** `azure.tenantId` is intentionally left empty in all `values-demo.yaml` and `argocd/apps/catalog.yaml` — it must be set to your Entra tenant ID before Stage 4 deployment (see How to Deploy step 6).
