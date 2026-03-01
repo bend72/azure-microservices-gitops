@@ -1,0 +1,216 @@
+---
+# argocd/apps/catalog.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Each microservice Application uses its own Helm chart under helm/services/<svc>
+# and its own namespace. Image tag is updated by CI via `argocd app set` or
+# the image-updater annotation below.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: catalog
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    # ArgoCD Image Updater — watches ACR, auto-PRs or commits new tags
+    argocd-image-updater.argoproj.io/image-list: "catalog=acrstage2demo.azurecr.io/catalog"
+    argocd-image-updater.argoproj.io/catalog.update-strategy: semver
+    argocd-image-updater.argoproj.io/catalog.allow-tags: "regexp:^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    argocd-image-updater.argoproj.io/write-back-method: git
+    argocd-image-updater.argoproj.io/git-branch: main
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: microservices
+  source:
+    repoURL: https://github.com/GITORG/GITREPO
+    targetRevision: main
+    path: helm/services/catalog
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-demo.yaml
+      parameters:
+        - name: global.env
+          value: demo
+        - name: otel.endpoint
+          value: http://otel-collector-collector.opentelemetry.svc.cluster.local:4317
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: catalog
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - RespectIgnoreDifferences=true
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas   # KEDA owns replica count
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ordering
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    argocd-image-updater.argoproj.io/image-list: "ordering=acrstage2demo.azurecr.io/ordering"
+    argocd-image-updater.argoproj.io/ordering.update-strategy: semver
+    argocd-image-updater.argoproj.io/write-back-method: git
+    argocd-image-updater.argoproj.io/git-branch: main
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: microservices
+  source:
+    repoURL: https://github.com/GITORG/GITREPO
+    targetRevision: main
+    path: helm/services/ordering
+    helm:
+      valueFiles: [values.yaml, values-demo.yaml]
+      parameters:
+        - name: global.env
+          value: demo
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ordering
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true, RespectIgnoreDifferences=true]
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers: [/spec/replicas]
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: basket
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    argocd-image-updater.argoproj.io/image-list: "basket=acrstage2demo.azurecr.io/basket"
+    argocd-image-updater.argoproj.io/basket.update-strategy: semver
+    argocd-image-updater.argoproj.io/write-back-method: git
+    argocd-image-updater.argoproj.io/git-branch: main
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: microservices
+  source:
+    repoURL: https://github.com/GITORG/GITREPO
+    targetRevision: main
+    path: helm/services/basket
+    helm:
+      valueFiles: [values.yaml, values-demo.yaml]
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: basket
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true, RespectIgnoreDifferences=true]
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers: [/spec/replicas]
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: identity
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"   # wave -1: identity must be up before other services
+    argocd-image-updater.argoproj.io/image-list: "identity=acrstage2demo.azurecr.io/identity"
+    argocd-image-updater.argoproj.io/identity.update-strategy: semver
+    argocd-image-updater.argoproj.io/write-back-method: git
+    argocd-image-updater.argoproj.io/git-branch: main
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: microservices
+  source:
+    repoURL: https://github.com/GITORG/GITREPO
+    targetRevision: main
+    path: helm/services/identity
+    helm:
+      valueFiles: [values.yaml, values-demo.yaml]
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: identity
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true]
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: payment
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    argocd-image-updater.argoproj.io/image-list: "payment=acrstage2demo.azurecr.io/payment"
+    argocd-image-updater.argoproj.io/payment.update-strategy: semver
+    argocd-image-updater.argoproj.io/write-back-method: git
+    argocd-image-updater.argoproj.io/git-branch: main
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: microservices
+  source:
+    repoURL: https://github.com/GITORG/GITREPO
+    targetRevision: main
+    path: helm/services/payment
+    helm:
+      valueFiles: [values.yaml, values-demo.yaml]
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: payment
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true, RespectIgnoreDifferences=true]
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers: [/spec/replicas]
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: notification
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"   # wave 1: last — depends on all others being up
+    argocd-image-updater.argoproj.io/image-list: "notification=acrstage2demo.azurecr.io/notification"
+    argocd-image-updater.argoproj.io/notification.update-strategy: semver
+    argocd-image-updater.argoproj.io/write-back-method: git
+    argocd-image-updater.argoproj.io/git-branch: main
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: microservices
+  source:
+    repoURL: https://github.com/GITORG/GITREPO
+    targetRevision: main
+    path: helm/services/notification
+    helm:
+      valueFiles: [values.yaml, values-demo.yaml]
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: notification
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true, RespectIgnoreDifferences=true]
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers: [/spec/replicas]

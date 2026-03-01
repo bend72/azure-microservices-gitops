@@ -1,0 +1,31 @@
+
+# argocd/apps/infrastructure.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Manages cluster-wide infrastructure Helm releases (NGINX, cert-manager, etc.)
+# Sync wave -2 ensures infra is ready before services land.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: infrastructure
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/GITORG/GITREPO
+    targetRevision: main
+    path: helm/infrastructure
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: infrastructure
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
