@@ -1,0 +1,8 @@
+# ── helm/services/basket/Chart.yaml ──────────────────────────────────────────
+apiVersion: v2
+name: basket
+description: Basket microservice — shopping cart, item management
+type: application
+version: 0.1.0
+appVersion: "0.0.0"   # overwritten by Image Updater / CI
+dependencies: []

@@ -1,0 +1,97 @@
+# ── helm/services/identity/templates/deployment.yaml ─────────────────────────
+# Identity is stateless — no database volume mount or DB env vars.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "identity.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "identity.labels" . | nindent 4 }}
+  annotations:
+    checksum/secrets: {{ include (print $.Template.BasePath "/secretproviderclass.yaml") . | sha256sum }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "identity.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "identity.selectorLabels" . | nindent 8 }}
+        azure.workload.identity/use: "true"
+      annotations:
+        dapr.io/enabled:            {{ .Values.dapr.enabled | quote }}
+        dapr.io/app-id:             {{ .Values.dapr.appId | quote }}
+        dapr.io/app-port:           {{ .Values.dapr.appPort | quote }}
+        dapr.io/log-level:          {{ .Values.dapr.logLevel | quote }}
+        dapr.io/enable-api-logging: {{ .Values.dapr.enableApiLogging | quote }}
+        dapr.io/sidecar-cpu-request:    "50m"
+        dapr.io/sidecar-memory-request: "64Mi"
+        dapr.io/sidecar-cpu-limit:      "300m"
+        dapr.io/sidecar-memory-limit:   "256Mi"
+        instrumentation.opentelemetry.io/inject-dotnet: "true"
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "9091"
+        prometheus.io/path:   "/metrics"
+    spec:
+      serviceAccountName: {{ include "identity.fullname" . }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: {{ include "identity.fullname" . }}-kv
+      initContainers:
+        - name: wait-for-dapr
+          image: busybox:1.36
+          command: ["sh", "-c", "until nc -z localhost 3500; do sleep 1; done"]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 50m, memory: 32Mi }
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
+            - name: metrics
+              containerPort: 9091
+              protocol: TCP
+          env:
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.otel.endpoint | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ .Values.dapr.appId | quote }}
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "deployment.environment={{ .Values.global.env }},service.namespace={{ .Release.Namespace }}"
+            - name: ASPNETCORE_ENVIRONMENT
+              value: {{ .Values.global.env | title | quote }}
+            - name: ServiceBus__ConnectionString
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "identity.fullname" . }}-secrets
+                  key: servicebus-connection-string
+          volumeMounts:
+            - name: secrets-store
+              mountPath: /mnt/secrets
+              readOnly: true
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      terminationGracePeriodSeconds: 30
+
+---

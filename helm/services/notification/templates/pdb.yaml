@@ -1,0 +1,15 @@
+# ── helm/services/notification/templates/pdb.yaml ────────────────────────────
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "notification.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "notification.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "notification.selectorLabels" . | nindent 6 }}
+{{- end }}

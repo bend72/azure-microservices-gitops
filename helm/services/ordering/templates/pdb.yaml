@@ -1,0 +1,15 @@
+# ── helm/services/ordering/templates/pdb.yaml ────────────────────────────────
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "ordering.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ordering.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "ordering.selectorLabels" . | nindent 6 }}
+{{- end }}

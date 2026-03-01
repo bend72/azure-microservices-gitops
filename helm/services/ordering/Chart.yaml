@@ -1,0 +1,8 @@
+# ── helm/services/ordering/Chart.yaml ────────────────────────────────────────
+apiVersion: v2
+name: ordering
+description: Ordering microservice — order creation, status, history
+type: application
+version: 0.1.0
+appVersion: "0.0.0"   # overwritten by Image Updater / CI
+dependencies: []

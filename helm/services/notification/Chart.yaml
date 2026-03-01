@@ -1,0 +1,8 @@
+# ── helm/services/notification/Chart.yaml ────────────────────────────────────
+apiVersion: v2
+name: notification
+description: Notification microservice — event-driven alerts and messaging
+type: application
+version: 0.1.0
+appVersion: "0.0.0"   # overwritten by Image Updater / CI
+dependencies: []

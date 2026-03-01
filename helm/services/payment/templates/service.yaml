@@ -1,0 +1,19 @@
+# ── helm/services/payment/templates/service.yaml ─────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "payment.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "payment.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "payment.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP
+
+---

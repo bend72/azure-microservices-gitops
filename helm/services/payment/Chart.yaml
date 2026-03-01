@@ -1,0 +1,8 @@
+# ── helm/services/payment/Chart.yaml ─────────────────────────────────────────
+apiVersion: v2
+name: payment
+description: Payment microservice — payment processing, refunds
+type: application
+version: 0.1.0
+appVersion: "0.0.0"   # overwritten by Image Updater / CI
+dependencies: []
