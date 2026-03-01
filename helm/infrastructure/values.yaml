@@ -1,0 +1,88 @@
+# ── helm/infrastructure/values.yaml ──────────────────────────────────────────
+global:
+  env: demo
+  # DNS zone managed in Azure — cert-manager uses DNS-01 via Azure DNS
+  dnsZone: contoso-demo.internal
+  # Azure DNS resource group (for cert-manager DNS-01 challenge)
+  azureDnsResourceGroup: rg-dns-shared
+  azureSubscriptionId: SUBSCRIPTION_ID   # patched by Backstage template
+  azureTenantId: TENANT_ID
+
+# ── NGINX Ingress ─────────────────────────────────────────────────────────────
+nginx:
+  controller:
+    replicaCount: 2
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits:   { cpu: 1,    memory: 512Mi }
+    service:
+      type: LoadBalancer
+      annotations:
+        service.beta.kubernetes.io/azure-load-balancer-health-probe-request-path: /healthz
+        # Pin to the APIM public IP from stage2 outputs if front-dooring through APIM
+        # service.beta.kubernetes.io/azure-pip-name: pip-apim-stage2-demo
+    metrics:
+      enabled: true
+      serviceMonitor:
+        enabled: true
+        namespace: monitoring
+    config:
+      # Pass trace context headers to upstream services
+      proxy-set-headers: "infrastructure/nginx-custom-headers"
+      # Increase for large gRPC payloads (OTel, Dapr)
+      proxy-body-size: "32m"
+      # Enable Brotli compression
+      use-gzip: "true"
+      gzip-level: "5"
+    podAnnotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port:   "10254"
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: ingress-nginx
+
+# ── cert-manager ─────────────────────────────────────────────────────────────
+certmanager:
+  installCRDs: true
+  replicaCount: 1
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits:   { cpu: 200m, memory: 256Mi }
+  podLabels:
+    azure.workload.identity/use: "true"
+  serviceAccount:
+    annotations:
+      azure.workload.identity/client-id: CERT_MANAGER_CLIENT_ID   # patched by template
+
+# ── ArgoCD Image Updater ──────────────────────────────────────────────────────
+imageUpdater:
+  replicaCount: 1
+  config:
+    # Write-back strategy: commit tag bumps directly to the gitops repo
+    gitCommitUser: "argocd-image-updater"
+    gitCommitEmail: "argocd-image-updater@contoso.com"
+    # Log level: trace useful during initial setup, drop to info after
+    logLevel: info
+  authScripts:
+    enabled: true
+    scripts:
+      acr.sh: |
+        #!/bin/sh
+        # Authenticate to ACR using workload identity (az CLI must be in the image)
+        TOKEN=$(az acr login --name acrstage2demo --expose-token --output tsv --query accessToken)
+        echo "{\"auths\":{\"acrstage2demo.azurecr.io\":{\"auth\":\"$(echo "00000000-0000-0000-0000-000000000000:$TOKEN" | base64 | tr -d '\n')\"}}}"
+  registries:
+    - name: acrstage2demo
+      api_url: https://acrstage2demo.azurecr.io
+      credentials: ext:/app/auth-scripts/acr.sh
+      default: true
+      insecure: false
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits:   { cpu: 200m, memory: 128Mi }
+
+---
