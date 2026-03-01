@@ -1,0 +1,19 @@
+# ── helm/services/catalog/templates/service.yaml ─────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "catalog.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "catalog.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "catalog.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP
+
+---

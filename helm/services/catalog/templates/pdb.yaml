@@ -1,0 +1,15 @@
+# ── helm/services/catalog/templates/pdb.yaml ─────────────────────────────────
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "catalog.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "catalog.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "catalog.selectorLabels" . | nindent 6 }}
+{{- end }}

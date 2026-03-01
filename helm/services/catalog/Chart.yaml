@@ -1,0 +1,9 @@
+
+# ── helm/services/catalog/Chart.yaml ─────────────────────────────────────────
+apiVersion: v2
+name: catalog
+description: Catalog microservice — product listings, search, inventory
+type: application
+version: 0.1.0
+appVersion: "0.0.0"   # overwritten by Image Updater / CI
+dependencies: []

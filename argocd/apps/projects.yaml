@@ -1,0 +1,83 @@
+---
+# argocd/apps/projects.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# AppProjects scope what each team can deploy and where.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+spec:
+  description: Platform infrastructure managed by platform engineers
+  sourceRepos:
+    - https://github.com/GITORG/GITREPO
+    - https://prometheus-community.github.io/helm-charts
+    - https://charts.jetstack.io
+    - https://kubernetes.github.io/ingress-nginx
+  destinations:
+    - namespace: infrastructure
+      server: https://kubernetes.default.svc
+    - namespace: monitoring
+      server: https://kubernetes.default.svc
+    - namespace: cert-manager
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+  roles:
+    - name: platform-admin
+      policies:
+        - p, proj:platform:platform-admin, applications, *, platform/*, allow
+      groups:
+        - platform-admins
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: microservices
+  namespace: argocd
+spec:
+  description: Microservice workloads — dev teams have deploy rights to their own namespace only
+  sourceRepos:
+    - https://github.com/GITORG/GITREPO
+  destinations:
+    - namespace: catalog
+      server: https://kubernetes.default.svc
+    - namespace: ordering
+      server: https://kubernetes.default.svc
+    - namespace: basket
+      server: https://kubernetes.default.svc
+    - namespace: identity
+      server: https://kubernetes.default.svc
+    - namespace: payment
+      server: https://kubernetes.default.svc
+    - namespace: notification
+      server: https://kubernetes.default.svc
+  # Namespace-scoped only — no CRDs, no ClusterRoles
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: apps
+      kind: Deployment
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: ConfigMap
+    - group: ""
+      kind: ServiceAccount
+    - group: dapr.io
+      kind: Component
+    - group: dapr.io
+      kind: Resiliency
+    - group: keda.sh
+      kind: ScaledObject
+    - group: opentelemetry.io
+      kind: Instrumentation
+  roles:
+    - name: dev-deploy
+      policies:
+        - p, proj:microservices:dev-deploy, applications, sync, microservices/*, allow
+        - p, proj:microservices:dev-deploy, applications, get,  microservices/*, allow
+      groups:
+        - dev-team
