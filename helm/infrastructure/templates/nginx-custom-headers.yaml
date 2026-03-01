@@ -1,0 +1,14 @@
+# ── helm/infrastructure/templates/nginx-custom-headers.yaml ──────────────────
+# ConfigMap that tells NGINX to propagate W3C trace context headers upstream
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-custom-headers
+  namespace: infrastructure
+data:
+  traceparent:      ""   # NGINX passes through; value set by caller
+  tracestate:       ""
+  X-Request-Id:     "$request_id"
+  X-Correlation-Id: "$request_id"
+
+---

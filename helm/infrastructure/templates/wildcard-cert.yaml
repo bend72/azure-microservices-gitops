@@ -1,0 +1,18 @@
+# ── helm/infrastructure/templates/wildcard-cert.yaml ─────────────────────────
+# One wildcard cert covers all service ingresses — avoids per-service cert churn
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wildcard-demo
+  namespace: infrastructure
+spec:
+  secretName: wildcard-demo-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  commonName: "*.{{ .Values.global.dnsZone }}"
+  dnsNames:
+    - "*.{{ .Values.global.dnsZone }}"
+    - "{{ .Values.global.dnsZone }}"
+  duration: 2160h      # 90 days
+  renewBefore: 360h    # renew 15 days before expiry

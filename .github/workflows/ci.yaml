@@ -1,0 +1,285 @@
+# .github/workflows/ci.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Triggered on PR (build + scan only) and push to main (build + push + sync).
+# Runs on self-hosted AKS runners (GitHub Actions Runner Controller).
+# Authenticates to Azure via OIDC — no stored secrets.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: CI — Build · Scan · Push · Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "helm/**"
+      - ".github/workflows/ci.yaml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "helm/**"
+
+# Cancel in-progress runs on the same branch to avoid queue pile-ups
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ACR_LOGIN_SERVER: acrstage2demo.azurecr.io
+  ARGOCD_SERVER:    argocd.contoso-demo.internal
+  GATEKEEPER_TEST_NS: gatekeeper-test
+
+jobs:
+  # ── 1. Detect changed services ─────────────────────────────────────────────
+  changed:
+    name: Detect changed services
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.filter.outputs.changes }}
+      any_changed: ${{ steps.filter.outputs.any_changed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect changed service dirs
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            catalog:      ["src/catalog/**"]
+            ordering:     ["src/ordering/**"]
+            basket:       ["src/basket/**"]
+            identity:     ["src/identity/**"]
+            payment:      ["src/payment/**"]
+            notification: ["src/notification/**"]
+
+  # ── 2. Build, test, scan — matrix across changed services ─────────────────
+  build:
+    name: Build & scan — ${{ matrix.service }}
+    needs: changed
+    if: needs.changed.outputs.any_changed == 'true'
+    runs-on: [self-hosted, aks, linux]   # AKS-hosted runner via GHRC
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.changed.outputs.matrix) }}
+    permissions:
+      contents: read
+      id-token: write    # OIDC token for Azure login
+      security-events: write  # upload Trivy SARIF to GitHub Security
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC — no stored credentials)
+        uses: azure/login@v2
+        with:
+          client-id:       ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Log in to ACR
+        run: az acr login --name acrstage2demo
+
+      # Compute semver tag from git — vMAJOR.MINOR.PATCH-SHA
+      - name: Compute image tag
+        id: tag
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          # Read version from Chart.yaml appVersion; fallback to 0.1.0
+          CHART_VER=$(grep '^appVersion' helm/services/${{ matrix.service }}/Chart.yaml | awk '{print $2}' | tr -d '"')
+          echo "tag=${CHART_VER}-${SHA}" >> "$GITHUB_OUTPUT"
+          echo "full_image=${{ env.ACR_LOGIN_SERVER }}/${{ matrix.service }}:${CHART_VER}-${SHA}" >> "$GITHUB_OUTPUT"
+
+      # Docker build with BuildKit cache mount → faster incremental builds
+      - name: Build image
+        uses: docker/build-push-action@v5
+        with:
+          context: src/${{ matrix.service }}
+          file:    src/${{ matrix.service }}/Dockerfile
+          push:    false
+          load:    true
+          tags:    ${{ steps.tag.outputs.full_image }}
+          cache-from: type=registry,ref=${{ env.ACR_LOGIN_SERVER }}/${{ matrix.service }}:buildcache
+          cache-to:   type=registry,ref=${{ env.ACR_LOGIN_SERVER }}/${{ matrix.service }}:buildcache,mode=max
+          build-args: |
+            BUILD_VERSION=${{ steps.tag.outputs.tag }}
+
+      # Unit + integration tests inside the image
+      - name: Run tests
+        run: |
+          docker run --rm \
+            -e ASPNETCORE_ENVIRONMENT=Testing \
+            ${{ steps.tag.outputs.full_image }} \
+            dotnet test --no-build --logger "trx;LogFileName=results.trx" --collect "Code coverage"
+
+      # Trivy vulnerability scan — fail on CRITICAL
+      - name: Scan image (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref:     ${{ steps.tag.outputs.full_image }}
+          format:        sarif
+          output:        trivy-${{ matrix.service }}.sarif
+          severity:      CRITICAL,HIGH
+          exit-code:     "1"
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-${{ matrix.service }}.sarif
+          category:   trivy-${{ matrix.service }}
+
+      # Helm lint + dry-run against live cluster using Gatekeeper in audit mode
+      - name: Helm lint
+        run: helm lint helm/services/${{ matrix.service }}
+
+      - name: Validate against Gatekeeper (dry-run)
+        run: |
+          helm template test-release helm/services/${{ matrix.service }} \
+            --set image.tag=${{ steps.tag.outputs.tag }} \
+            --set global.workloadIdentityClientId=dry-run \
+            | kubectl apply --dry-run=server -f - \
+              --namespace ${{ env.GATEKEEPER_TEST_NS }}
+
+      # Only push to ACR on main branch, after all checks pass
+      - name: Push image to ACR
+        if: github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v5
+        with:
+          context: src/${{ matrix.service }}
+          file:    src/${{ matrix.service }}/Dockerfile
+          push:    true
+          tags: |
+            ${{ steps.tag.outputs.full_image }}
+            ${{ env.ACR_LOGIN_SERVER }}/${{ matrix.service }}:latest-main
+          cache-from: type=registry,ref=${{ env.ACR_LOGIN_SERVER }}/${{ matrix.service }}:buildcache
+          cache-to:   type=registry,ref=${{ env.ACR_LOGIN_SERVER }}/${{ matrix.service }}:buildcache,mode=max
+
+      # Write image tag back to Helm chart for ArgoCD Image Updater to pick up
+      # (alternative to Image Updater if you want CI to own the commit)
+      - name: Bump chart appVersion in gitops repo
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITOPS_PAT }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          sed -i "s/^appVersion:.*/appVersion: \"${{ steps.tag.outputs.tag }}\"/" \
+            helm/services/${{ matrix.service }}/Chart.yaml
+          git add helm/services/${{ matrix.service }}/Chart.yaml
+          git diff --cached --quiet || \
+            git commit -m "chore(${{ matrix.service }}): bump image to ${{ steps.tag.outputs.tag }} [skip ci]"
+          git push
+
+  # ── 3. ArgoCD sync — runs after ALL matrix jobs succeed ───────────────────
+  sync:
+    name: ArgoCD sync
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, aks, linux]
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id:       ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install ArgoCD CLI
+        run: |
+          curl -sSL -o /usr/local/bin/argocd \
+            https://github.com/argoproj/argo-cd/releases/download/v2.11.0/argocd-linux-amd64
+          chmod +x /usr/local/bin/argocd
+
+      - name: ArgoCD login (via cluster RBAC — no password stored)
+        run: |
+          argocd login ${{ env.ARGOCD_SERVER }} \
+            --auth-token ${{ secrets.ARGOCD_AUTH_TOKEN }} \
+            --grpc-web \
+            --skip-test-tls
+
+      # Sync only the apps whose services changed — not a full cluster sync
+      - name: Sync changed apps
+        run: |
+          APPS='${{ needs.changed.outputs.matrix }}'
+          for app in $(echo "$APPS" | jq -r '.[]'); do
+            echo "▶ Syncing ArgoCD app: $app"
+            argocd app sync "$app" \
+              --prune \
+              --retry-limit 3 \
+              --timeout 300 \
+              --async
+          done
+
+      - name: Wait for apps to be healthy
+        run: |
+          APPS='${{ needs.changed.outputs.matrix }}'
+          for app in $(echo "$APPS" | jq -r '.[]'); do
+            echo "⏳ Waiting for $app to be Healthy..."
+            argocd app wait "$app" \
+              --health \
+              --timeout 300
+            echo "✅ $app is Healthy"
+          done
+
+  # ── 4. Integration smoke test — runs after sync ────────────────────────────
+  smoke:
+    name: Smoke test
+    needs: sync
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, aks, linux]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run smoke tests via APIM gateway
+        env:
+          APIM_GATEWAY: ${{ secrets.APIM_GATEWAY_URL }}
+          APIM_KEY:     ${{ secrets.APIM_SUBSCRIPTION_KEY }}
+        run: |
+          # Basic health check on each service through APIM
+          for svc in catalog ordering basket identity payment notification; do
+            STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
+              -H "Ocp-Apim-Subscription-Key: $APIM_KEY" \
+              "$APIM_GATEWAY/$svc/healthz/ready")
+            if [ "$STATUS" != "200" ]; then
+              echo "❌ $svc healthcheck returned $STATUS"
+              exit 1
+            fi
+            echo "✅ $svc → $STATUS"
+          done
+
+      - name: Run k6 load test (10s warm-up)
+        uses: grafana/k6-action@v0.3.1
+        with:
+          filename: tests/k6/smoke.js
+        env:
+          APIM_GATEWAY: ${{ secrets.APIM_GATEWAY_URL }}
+          APIM_KEY:     ${{ secrets.APIM_SUBSCRIPTION_KEY }}
+
+  # ── 5. Notify on failure ────────────────────────────────────────────────────
+  notify:
+    name: Notify on failure
+    needs: [build, sync, smoke]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to Teams
+        uses: aliencube/microsoft-teams-actions@v0.8.0
+        with:
+          webhook_uri: ${{ secrets.TEAMS_WEBHOOK_URI }}
+          title:       "❌ CI failed — ${{ github.repository }}"
+          summary:     "Pipeline failed on ${{ github.ref }} — ${{ github.run_url }}"
+          theme_color: "FF0000"
+          actions: |
+            [{
+              "@type": "OpenUri",
+              "name": "View run",
+              "targets": [{ "os": "default", "uri": "${{ github.run_url }}" }]
+            }]

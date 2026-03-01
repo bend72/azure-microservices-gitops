@@ -1,0 +1,21 @@
+# ── helm/infrastructure/Chart.yaml ───────────────────────────────────────────
+apiVersion: v2
+name: infrastructure
+description: Cluster-wide infrastructure — NGINX ingress, cert-manager, ArgoCD Image Updater
+type: application
+version: 0.1.0
+dependencies:
+  - name: ingress-nginx
+    version: "4.10.1"
+    repository: https://kubernetes.github.io/ingress-nginx
+    alias: nginx
+  - name: cert-manager
+    version: "1.14.5"
+    repository: https://charts.jetstack.io
+    alias: certmanager
+  - name: argocd-image-updater
+    version: "0.11.0"
+    repository: https://argoproj.github.io/argo-helm
+    alias: imageUpdater
+
+---

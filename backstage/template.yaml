@@ -1,0 +1,326 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: azure-microservice
+  title: Azure Microservice — Demo Platform
+  description: >
+    Scaffolds a new .NET 8 microservice on AKS with Dapr pub/sub, KEDA autoscaling,
+    OTel tracing, ArgoCD GitOps delivery, and full Backstage catalog registration.
+    Patches Helm values, creates the ArgoCD Application, registers a Workload Identity
+    federated credential, and opens a GitHub PR — all in one click.
+  tags:
+    - dotnet
+    - azure
+    - aks
+    - microservices
+    - dapr
+    - recommended
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+spec:
+  owner: group:platform-engineers
+  type: service
+
+  # ── Parameters — rendered as a multi-step form in the Backstage UI ──────────
+  parameters:
+    - title: Service details
+      required: [serviceName, serviceDescription, owner]
+      properties:
+        serviceName:
+          title: Service name
+          type: string
+          description: >
+            Lowercase, hyphen-separated. Becomes the Kubernetes namespace,
+            Helm release name, Dapr app-id, and ACR image name.
+          pattern: "^[a-z][a-z0-9-]{2,28}[a-z0-9]$"
+          ui:autofocus: true
+
+        serviceDescription:
+          title: Short description
+          type: string
+          maxLength: 120
+
+        owner:
+          title: Owning team
+          type: string
+          description: Backstage group who will own this component (e.g. team-checkout)
+          ui:field: OwnerPicker
+          ui:options:
+            allowedKinds: [Group]
+
+        lifecycle:
+          title: Lifecycle
+          type: string
+          default: experimental
+          enum: [experimental, production, deprecated]
+          enumNames: [Experimental, Production, Deprecated]
+
+    - title: Database & messaging
+      properties:
+        databaseType:
+          title: Primary database
+          type: string
+          default: cosmos
+          enum: [cosmos, sql, none]
+          enumNames:
+            - Azure Cosmos DB (document — serverless)
+            - Azure SQL (relational — serverless)
+            - None (stateless service)
+
+        publishesEvents:
+          title: Publishes events to Service Bus?
+          type: boolean
+          default: true
+
+        subscribesTo:
+          title: Subscribe to events from these services
+          type: array
+          items:
+            type: string
+            enum: [catalog, ordering, basket, identity, payment, notification]
+          uniqueItems: true
+          ui:widget: checkboxes
+
+    - title: Infrastructure & delivery
+      required: [targetEnv]
+      properties:
+        targetEnv:
+          title: Target environment
+          type: string
+          default: demo
+          enum: [demo, staging, production]
+          enumNames: [Demo (AKS stage-2), Staging, Production]
+
+        enableKeda:
+          title: Enable KEDA autoscaling?
+          type: boolean
+          default: true
+          description: Scale pods based on Service Bus message count
+
+        minReplicas:
+          title: Minimum replicas
+          type: integer
+          default: 1
+          minimum: 1
+          maximum: 5
+
+        maxReplicas:
+          title: Maximum replicas (KEDA ceiling)
+          type: integer
+          default: 20
+          minimum: 2
+          maximum: 100
+
+        enablePdb:
+          title: Enable PodDisruptionBudget?
+          type: boolean
+          default: true
+          description: Recommended for production; disable for single-replica demos
+
+    - title: Repository
+      required: [repoOrg]
+      properties:
+        repoOrg:
+          title: GitHub organisation
+          type: string
+          default: contoso
+
+        createRepo:
+          title: Create a new GitHub repository for this service?
+          type: boolean
+          default: false
+          description: >
+            If unchecked, the service is added as a sub-path to the monorepo
+            (src/<serviceName>/) and the Helm chart is committed to helm/services/<serviceName>/.
+
+  # ── Steps — executed server-side by the Backstage scaffolder ───────────────
+  steps:
+    # ── 1. Fetch skeleton from the catalog Helm chart we built ────────────────
+    - id: fetch-skeleton
+      name: Fetch service skeleton
+      action: fetch:template
+      input:
+        url: ./skeleton    # relative to this template.yaml in the repo
+        targetPath: .
+        values:
+          serviceName:        ${{ parameters.serviceName }}
+          serviceDescription: ${{ parameters.serviceDescription }}
+          owner:              ${{ parameters.owner }}
+          databaseType:       ${{ parameters.databaseType }}
+          publishesEvents:    ${{ parameters.publishesEvents }}
+          subscribesTo:       ${{ parameters.subscribesTo }}
+          targetEnv:          ${{ parameters.targetEnv }}
+          minReplicas:        ${{ parameters.minReplicas }}
+          maxReplicas:        ${{ parameters.maxReplicas }}
+          enableKeda:         ${{ parameters.enableKeda }}
+          enablePdb:          ${{ parameters.enablePdb }}
+          # Azure identifiers injected from Backstage app-config.yaml
+          tenantId:           ${{ config.azure.tenantId }}
+          subscriptionId:     ${{ config.azure.subscriptionId }}
+          acrLoginServer:     ${{ config.azure.acrLoginServer }}
+          keyVaultName:       ${{ config.azure.keyVaultName }}
+          gitOrg:             ${{ parameters.repoOrg }}
+          gitRepo:            ${{ config.azure.gitopsRepo }}
+
+    # ── 2. Patch Helm values.yaml with the new service's settings ─────────────
+    - id: patch-helm-values
+      name: Generate Helm values
+      action: fs:append
+      input:
+        path: helm/services/${{ parameters.serviceName }}/values.yaml
+        content: |
+          # Auto-generated by Backstage template — do not hand-edit this block
+          global:
+            env: ${{ parameters.targetEnv }}
+            acrLoginServer: ${{ config.azure.acrLoginServer }}
+          dapr:
+            appId: ${{ parameters.serviceName }}
+            appPort: 8080
+          autoscaling:
+            minReplicas: ${{ parameters.minReplicas }}
+            maxReplicas: ${{ parameters.maxReplicas }}
+          podDisruptionBudget:
+            enabled: ${{ parameters.enablePdb }}
+
+    # ── 3. Create the ArgoCD Application manifest ─────────────────────────────
+    - id: create-argocd-app
+      name: Create ArgoCD Application manifest
+      action: fetch:template
+      input:
+        url: ./skeleton/argocd-app.yaml.njk
+        targetPath: argocd/apps/${{ parameters.serviceName }}.yaml
+        values:
+          serviceName:    ${{ parameters.serviceName }}
+          gitOrg:         ${{ parameters.repoOrg }}
+          gitRepo:        ${{ config.azure.gitopsRepo }}
+          acrLoginServer: ${{ config.azure.acrLoginServer }}
+          targetEnv:      ${{ parameters.targetEnv }}
+
+    # ── 4. Register Workload Identity federated credential in Azure AD ─────────
+    # Uses the azure:workload-identity action from the community plugin
+    - id: create-workload-identity
+      name: Create Workload Identity federated credential
+      action: azure:workload-identity:create
+      input:
+        tenantId:        ${{ config.azure.tenantId }}
+        subscriptionId:  ${{ config.azure.subscriptionId }}
+        resourceGroup:   rg-microservices-stage2-${{ parameters.targetEnv }}
+        aksClusterName:  aks-stage2-${{ parameters.targetEnv }}
+        namespace:       ${{ parameters.serviceName }}
+        serviceAccount:  ${{ parameters.serviceName }}
+        appName:         app-${{ parameters.serviceName }}-${{ parameters.targetEnv }}
+
+    # ── 5. Grant Key Vault secret read access to the new managed identity ──────
+    - id: grant-kv-access
+      name: Grant Key Vault access
+      action: azure:keyvault:assignRole
+      input:
+        tenantId:         ${{ config.azure.tenantId }}
+        subscriptionId:   ${{ config.azure.subscriptionId }}
+        keyVaultName:     ${{ config.azure.keyVaultName }}
+        principalId:      ${{ steps.create-workload-identity.output.principalId }}
+        role:             Key Vault Secrets User
+
+    # ── 6. Create Service Bus topics + subscriptions if required ───────────────
+    - id: create-servicebus-resources
+      name: Create Service Bus topic & subscriptions
+      if: ${{ parameters.publishesEvents or parameters.subscribesTo.length > 0 }}
+      action: azure:servicebus:provision
+      input:
+        tenantId:        ${{ config.azure.tenantId }}
+        subscriptionId:  ${{ config.azure.subscriptionId }}
+        resourceGroup:   rg-microservices-stage2-${{ parameters.targetEnv }}
+        namespace:       sb-stage2-${{ parameters.targetEnv }}
+        serviceName:     ${{ parameters.serviceName }}
+        publishesEvents: ${{ parameters.publishesEvents }}
+        subscribesTo:    ${{ parameters.subscribesTo }}
+
+    # ── 7. Register the catalog entity (catalog-info.yaml) ────────────────────
+    - id: create-catalog-info
+      name: Create catalog-info.yaml
+      action: fetch:template
+      input:
+        url: ./skeleton/catalog-info.yaml.njk
+        targetPath: catalog-info.yaml
+        values:
+          serviceName:        ${{ parameters.serviceName }}
+          serviceDescription: ${{ parameters.serviceDescription }}
+          owner:              ${{ parameters.owner }}
+          lifecycle:          ${{ parameters.lifecycle }}
+          databaseType:       ${{ parameters.databaseType }}
+          publishesEvents:    ${{ parameters.publishesEvents }}
+          subscribesTo:       ${{ parameters.subscribesTo }}
+          gitOrg:             ${{ parameters.repoOrg }}
+          gitRepo:            ${{ config.azure.gitopsRepo }}
+
+    # ── 8. Open a GitHub PR against the monorepo with all generated files ──────
+    - id: create-pr
+      name: Open GitHub pull request
+      action: publish:github:pull-request
+      input:
+        repoUrl:       github.com?repo=${{ config.azure.gitopsRepo }}&owner=${{ parameters.repoOrg }}
+        branchName:    backstage/new-service-${{ parameters.serviceName }}
+        title:         "feat(${{ parameters.serviceName }}): scaffold new microservice"
+        description: |
+          ## New microservice: `${{ parameters.serviceName }}`
+
+          Generated by Backstage Software Template.
+
+          ### What's included
+          - `src/${{ parameters.serviceName }}/` — .NET 8 project skeleton
+          - `helm/services/${{ parameters.serviceName }}/` — Helm chart (copied from catalog skeleton, values patched)
+          - `argocd/apps/${{ parameters.serviceName }}.yaml` — ArgoCD Application
+          - `catalog-info.yaml` — Backstage catalog registration
+
+          ### Azure resources provisioned
+          - Workload Identity federated credential (principal: `${{ steps.create-workload-identity.output.principalId }}`)
+          - Key Vault Secrets User role assigned
+          ${{ parameters.publishesEvents && '- Service Bus topic: `' + parameters.serviceName + '-events`' || '' }}
+          ${{ parameters.subscribesTo.length > 0 && '- Service Bus subscriptions: ' + parameters.subscribesTo.join(', ') || '' }}
+
+          ### Next steps after merge
+          1. ArgoCD will auto-sync within 3 minutes of merge
+          2. KEDA ScaledObject will activate once the first event lands on the topic
+          3. Check the [ArgoCD UI](https://argocd.${{ config.azure.internalDomain }}) and [Grafana](https://grafana.${{ config.azure.internalDomain }}) for rollout status
+        targetBranchName: main
+        update: true
+
+    # ── 9. Register the component in the Backstage software catalog ───────────
+    - id: register-catalog
+      name: Register in Backstage catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps.create-pr.output.remoteUrl }}
+        catalogInfoPath: /catalog-info.yaml
+        optional: true   # non-blocking — PR must merge before entity is fully live
+
+  # ── Output — shown to the user in the Backstage UI after completion ─────────
+  output:
+    links:
+      - title: Pull Request
+        url: ${{ steps.create-pr.output.remoteUrl }}
+        icon: github
+
+      - title: ArgoCD Application
+        url: https://argocd.${{ config.azure.internalDomain }}/applications/${{ parameters.serviceName }}
+        icon: dashboard
+
+      - title: Grafana dashboard
+        url: https://grafana.${{ config.azure.internalDomain }}/d/microservices?var-service=${{ parameters.serviceName }}
+        icon: dashboard
+
+      - title: Catalog entity
+        url: ${{ steps.register-catalog.output.entityRef }}
+        icon: catalog
+
+    text:
+      - title: Workload Identity principal ID
+        content: ${{ steps.create-workload-identity.output.principalId }}
+
+      - title: Next step
+        content: >
+          Merge the PR, then watch ArgoCD auto-sync your new service into the
+          `${{ parameters.serviceName }}` namespace. KEDA will scale it to zero
+          until the first Service Bus message arrives.
+
+---
