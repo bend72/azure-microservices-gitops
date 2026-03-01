@@ -1,0 +1,6 @@
+[submodule "src/eshop-on-dapr"]
+	path = src/eshop-on-dapr
+	url = https://github.com/dotnet-architecture/eShopOnDapr.git
+[submodule "src/monolith"]
+	path = src/monolith
+	url = https://github.com/dotnet-architecture/eShopModernizing.git
