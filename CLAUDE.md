@@ -2,24 +2,43 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Repository Purpose
+## Project Goal
 
-This is a **GitOps infrastructure-as-code repository** for a multi-stage Azure Kubernetes Service (AKS) microservices platform. It is **not an application codebase** — there are no application build steps. Changes here are deployed automatically via ArgoCD when pushed to `main`.
+Build a four-stage live demo platform showing the evolution from monolith to microservices. The audience is non-engineers; the demo must be visual and immediate. **Backstage is the single pane of glass** — the presenter never leaves it.
+
+| Stage | Architecture | Key Demo Point |
+|---|---|---|
+| 1 | ASP.NET Monolith on App Service + shared SQL | Tight coupling, shared schema, single point of failure |
+| 2 | 7 Microservices on AKS + APIM + Service Bus | Kill one pod, others keep running; each service owns its DB |
+| 3 | Dapr, KEDA, Prometheus | Autoscaling, observability, failure injection |
+| 4 | ArgoCD, OPA Gatekeeper, OpenTelemetry + **Claude Code as pipeline actor** | AI-driven platform via Backstage Software Template |
+
+**Killer demo moment (Stage 2):** Backstage dependency graph shows 7 services each connected to their own database node. Then `kubectl delete pod -l app=ordering` — Basket and Catalog keep serving traffic; Service Bus retains the lost events for replay.
+
+**Meta-demo (Stage 4):** The Backstage Software Template invokes Claude Code via MCP to scaffold new services — AI driving the platform.
 
 ## Infrastructure Provisioning (Pulumi)
 
-The `infra/` directory contains TypeScript Pulumi programs deployed in stages:
+The `infra/` directory contains TypeScript Pulumi programs. Each stage is an independent entry point:
 
 ```bash
-# Run from infra/ directory with appropriate Pulumi stack selected
-pulumi preview        # Dry-run to see planned changes
-pulumi up             # Apply changes to Azure
-pulumi destroy        # Tear down resources
+cd infra
+npm install
+
+# Stage 1 — monolith foundation (update Pulumi.yaml main: stage1.ts)
+pulumi stack init stage1
+pulumi up
+
+# Stage 2 — AKS microservices (update Pulumi.yaml main: stage2.ts)
+pulumi stack init stage2
+pulumi up
+
+# Stages 3 & 4 follow the same pattern
+pulumi preview          # dry-run
+pulumi destroy          # tear down
 ```
 
-- **stage2.ts** — Azure foundation: Resource Group, VNet, AKS (Cilium CNI), ACR, Service Bus, Cosmos DB, Azure SQL, Key Vault, APIM, private endpoints
-- **stage3.ts** — Cluster components: Dapr 1.13.0, KEDA 2.14.0, Prometheus/Grafana (kube-prometheus-stack 58.6.0)
-- **stage4.ts** — GitOps governance: ArgoCD 6.11.1, OPA Gatekeeper 3.17.1, OpenTelemetry Operator 0.61.0
+To switch which stage runs, change the `main` field in `infra/Pulumi.yaml` to `stage1.ts`, `stage2.ts`, etc., or update `Pulumi.<stack>.yaml` with a per-stack override.
 
 ## Helm Chart Validation
 
@@ -27,68 +46,88 @@ pulumi destroy        # Tear down resources
 helm lint helm/infrastructure/
 helm lint helm/services/catalog/
 
-# Render templates locally to inspect output
-helm template my-release helm/services/catalog/ -f helm/services/catalog/values.yaml
-helm template my-release helm/infrastructure/ -f helm/infrastructure/values.yaml
+# Render templates locally
+helm template release helm/services/catalog/ -f helm/services/catalog/values.yaml
+helm template release helm/infrastructure/ -f helm/infrastructure/values.yaml
 ```
 
 ## Performance Testing
 
 ```bash
-# k6 smoke test (once implemented)
 k6 run tests/k6/smoke.js
 ```
 
 ## Architecture Overview
 
-### GitOps Flow
+### Repository Layout
 
-1. Push Helm chart changes to `helm/services/<service>/` or `helm/infrastructure/`
-2. ArgoCD detects the commit and syncs automatically (self-healing, pruning enabled)
-3. ArgoCD Image Updater watches ACR (`acrstage2demo.azurecr.io`) for new semver tags and commits them to `main`
-4. KEDA autoscales pods (1–20 replicas) based on Azure Service Bus message count (threshold: 10)
+```
+infra/            Pulumi TypeScript — stage1.ts through stage4.ts
+helm/
+  infrastructure/ NGINX ingress, cert-manager, ArgoCD Image Updater
+  services/       Per-service Helm charts (catalog is the reference)
+argocd/apps/      ArgoCD Application CRs (app-of-apps pattern)
+backstage/        Backstage IDP config + Dockerfile (to be built out)
+services/         The 7 microservice application codebases (to be added)
+tests/k6/         k6 smoke tests
+```
 
-### ArgoCD App-of-Apps Pattern
+### GitOps Flow (Stages 3–4)
 
-`argocd/apps/` contains ArgoCD `Application` CRs. The root `app-of-apps` Application watches this directory and manages all deployments.
+1. Push Helm chart changes to `helm/services/<service>/`
+2. ArgoCD detects the commit and syncs automatically
+3. ArgoCD Image Updater watches `acrstage2demo.azurecr.io` for new semver tags and commits them to `main`
+4. KEDA autoscales pods (1–20) based on Azure Service Bus message count (threshold: 10)
 
-**Sync waves** (order of deployment):
-- Wave -2: Infrastructure (NGINX ingress, cert-manager)
+### ArgoCD App-of-Apps
+
+`argocd/apps/` contains ArgoCD `Application` CRs. Sync wave order:
+- Wave -2: Infrastructure (NGINX, cert-manager)
 - Wave -1: Identity, Monitoring
 - Wave 0: Catalog, Ordering, Basket, Payment
 - Wave 1: Notification
 
-**Projects** (RBAC isolation):
-- `platform` — cluster-wide infra; `platform-admins` group only
-- `microservices` — namespace-scoped services; `dev-team` group gets sync rights
+RBAC projects: `platform` (cluster-wide, platform-admins only) and `microservices` (namespace-scoped, dev-team).
 
 ### Adding a New Microservice
 
-When adding a new service (e.g., `myservice`), you need changes in three places:
-
-1. **`helm/services/myservice/`** — Copy and adapt from `helm/services/catalog/`. Key templates: `deployment.yaml`, `service.yaml`, `ingress.yaml`, `secretproviderclass.yaml`, `pdb.yaml`
-2. **`argocd/apps/myservice.yaml`** — ArgoCD Application CR pointing to `helm/services/myservice`, with Image Updater annotations and appropriate sync wave
-3. **`infra/stage2.ts`** — Add namespace, Service Bus topic/subscriptions, data store, Key Vault secrets, APIM API, private endpoints as needed
+Three files needed:
+1. `helm/services/<name>/` — copy from `helm/services/catalog/`
+2. `argocd/apps/<name>.yaml` — ArgoCD Application CR with Image Updater annotations and sync wave
+3. `infra/stage2.ts` — namespace, Service Bus topic/subscriptions, data store, Key Vault secrets, APIM API
 
 ### Key Conventions
 
-- **Workload Identity**: All pods use `azure.workload.identity/use: "true"` label. Never use static credentials.
-- **Secrets**: Injected via Azure CSI Secrets Store (Key Vault). Secrets are mounted as env vars. The `SecretProviderClass` template maps KV secret names to Kubernetes secret keys.
-- **Dapr**: All services use Dapr sidecar for pub/sub (Service Bus) and secret access. The init container (`busybox`) waits for the Dapr sidecar on port 3500 before the main app starts.
-- **OPA Gatekeeper policies**: CPU/memory requests+limits are required on all pods. `:latest` image tags are denied. Do not remove resource requests/limits from Helm values.
-- **Replica counts**: Do not set `replicas` > 1 in Helm values — KEDA owns replica counts at runtime. ArgoCD is configured to ignore replica count drift for microservice apps.
-- **Image tagging**: Never use `:latest`. ArgoCD Image Updater requires semver tags (e.g., `0.1.0`).
-- **cert-manager / TLS**: DNS-01 ACME challenge via Azure DNS with workload identity. `ClusterIssuer` template is in `helm/infrastructure/templates/clusterissuer.yaml`.
+- **Workload Identity:** All pods use `azure.workload.identity/use: "true"`. App Services use System Assigned Managed Identity. No stored credentials anywhere.
+- **Secrets:** Azure CSI Secrets Store syncs Key Vault secrets into pod env vars via `SecretProviderClass`.
+- **Dapr:** All microservices use Dapr sidecar for pub/sub (Service Bus) and secret access. Init container waits for Dapr on port 3500.
+- **OPA Gatekeeper:** CPU/memory requests+limits required on all pods. `:latest` image tags denied.
+- **Replica counts:** KEDA owns replica counts at runtime. Do not set `replicas > 1` in Helm values. ArgoCD ignores replica drift.
+- **Image tagging:** Semver only (e.g., `0.1.0`). ArgoCD Image Updater requires it.
 
 ### Key Resource Identifiers
 
 | Resource | Value |
 |---|---|
 | ACR | `acrstage2demo.azurecr.io` |
-| Resource Group | `rg-microservices-stage2-demo` |
+| Stage 1 RG | `rg-microservices-stage1-<env>` |
+| Stage 2 RG | `rg-microservices-stage2-<env>` |
 | AKS version | 1.29, Cilium CNI |
-| Azure region | `uksouth` (configurable) |
+| Azure region | `uksouth` (configurable via `location` config) |
 | Internal DNS zone | `contoso-demo.internal` |
 | Service Bus retention | 14 days |
-| Cosmos DB | Serverless (catalog, basket) |
-| Azure SQL | General Purpose, auto-pause 60min (ordering, payment) |
+| Stage 2 data stores | Cosmos DB serverless (catalog, basket) + Azure SQL auto-pause (ordering, payment) |
+
+### GitHub Actions Secrets Required
+
+```
+AZURE_CLIENT_ID          # Federated credential client ID
+AZURE_TENANT_ID
+AZURE_SUBSCRIPTION_ID
+PULUMI_ACCESS_TOKEN
+BACKSTAGE_GITHUB_APP_ID
+BACKSTAGE_GITHUB_PRIVATE_KEY
+AUTH_MICROSOFT_CLIENT_ID
+AUTH_MICROSOFT_CLIENT_SECRET
+AUTH_MICROSOFT_TENANT_ID
+```

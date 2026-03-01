@@ -1,0 +1,14 @@
+{
+  "name": "azure-microservices-demo-infra",
+  "version": "1.0.0",
+  "devDependencies": {
+    "@types/node": "^18",
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@pulumi/pulumi": "^3",
+    "@pulumi/azure-native": "^2",
+    "@pulumi/kubernetes": "^4",
+    "@pulumi/random": "^4"
+  }
+}
