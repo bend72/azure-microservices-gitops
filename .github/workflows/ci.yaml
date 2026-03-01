@@ -3,6 +3,10 @@
 # Triggered on PR (build + scan only) and push to main (build + push + sync).
 # Runs on self-hosted AKS runners (GitHub Actions Runner Controller).
 # Authenticates to Azure via OIDC — no stored secrets.
+#
+# Source code lives in git submodules under src/:
+#   src/eshop-on-dapr  → eShopOnDapr (microservices, Stages 2-3)
+#   src/monolith       → eShopModernizing (Stage 1, not built by this pipeline)
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: CI — Build · Scan · Push · Deploy
@@ -29,6 +33,8 @@ env:
   ACR_LOGIN_SERVER: acrstage2demo.azurecr.io
   ARGOCD_SERVER:    argocd.contoso-demo.internal
   GATEKEEPER_TEST_NS: gatekeeper-test
+  # Root of the eShopOnDapr submodule
+  ESHOP_ROOT: src/eshop-on-dapr/src/Services
 
 jobs:
   # ── 1. Detect changed services ─────────────────────────────────────────────
@@ -40,18 +46,20 @@ jobs:
       any_changed: ${{ steps.filter.outputs.any_changed }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive   # needed so paths-filter sees files inside submodule
 
       - name: Detect changed service dirs
         id: filter
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            catalog:      ["src/catalog/**"]
-            ordering:     ["src/ordering/**"]
-            basket:       ["src/basket/**"]
-            identity:     ["src/identity/**"]
-            payment:      ["src/payment/**"]
-            notification: ["src/notification/**"]
+            catalog:      ["src/eshop-on-dapr/src/Services/Catalog.API/**"]
+            ordering:     ["src/eshop-on-dapr/src/Services/Ordering.API/**"]
+            basket:       ["src/eshop-on-dapr/src/Services/Basket.API/**"]
+            identity:     ["src/eshop-on-dapr/src/Services/Identity.API/**"]
+            payment:      ["src/eshop-on-dapr/src/Services/Payment.API/**"]
+            notification: ["src/eshop-on-dapr/src/Services/Webhooks.API/**"]
 
   # ── 2. Build, test, scan — matrix across changed services ─────────────────
   build:
@@ -70,6 +78,22 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive   # populate eShopOnDapr submodule for Docker build
+
+      # Resolve the service name to its path inside the eShopOnDapr submodule.
+      # eShopOnDapr uses PascalCase API directory names; notification maps to Webhooks.API.
+      - name: Resolve submodule source path
+        id: src
+        run: |
+          case "${{ matrix.service }}" in
+            catalog)      echo "path=src/eshop-on-dapr/src/Services/Catalog.API"  >> "$GITHUB_OUTPUT" ;;
+            ordering)     echo "path=src/eshop-on-dapr/src/Services/Ordering.API" >> "$GITHUB_OUTPUT" ;;
+            basket)       echo "path=src/eshop-on-dapr/src/Services/Basket.API"   >> "$GITHUB_OUTPUT" ;;
+            identity)     echo "path=src/eshop-on-dapr/src/Services/Identity.API" >> "$GITHUB_OUTPUT" ;;
+            payment)      echo "path=src/eshop-on-dapr/src/Services/Payment.API"  >> "$GITHUB_OUTPUT" ;;
+            notification) echo "path=src/eshop-on-dapr/src/Services/Webhooks.API" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - name: Azure login (OIDC — no stored credentials)
         uses: azure/login@v2
@@ -86,8 +110,9 @@ jobs:
         id: tag
         run: |
           SHA=$(git rev-parse --short HEAD)
-          # Read version from Chart.yaml appVersion; fallback to 0.1.0
+          # Read version from the Helm chart appVersion; fallback to 0.1.0
           CHART_VER=$(grep '^appVersion' helm/services/${{ matrix.service }}/Chart.yaml | awk '{print $2}' | tr -d '"')
+          CHART_VER=${CHART_VER:-0.1.0}
           echo "tag=${CHART_VER}-${SHA}" >> "$GITHUB_OUTPUT"
           echo "full_image=${{ env.ACR_LOGIN_SERVER }}/${{ matrix.service }}:${CHART_VER}-${SHA}" >> "$GITHUB_OUTPUT"
 
@@ -95,8 +120,8 @@ jobs:
       - name: Build image
         uses: docker/build-push-action@v5
         with:
-          context: src/${{ matrix.service }}
-          file:    src/${{ matrix.service }}/Dockerfile
+          context: ${{ steps.src.outputs.path }}
+          file:    ${{ steps.src.outputs.path }}/Dockerfile
           push:    false
           load:    true
           tags:    ${{ steps.tag.outputs.full_image }}
@@ -148,8 +173,8 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v5
         with:
-          context: src/${{ matrix.service }}
-          file:    src/${{ matrix.service }}/Dockerfile
+          context: ${{ steps.src.outputs.path }}
+          file:    ${{ steps.src.outputs.path }}/Dockerfile
           push:    true
           tags: |
             ${{ steps.tag.outputs.full_image }}
@@ -236,7 +261,7 @@ jobs:
     runs-on: [self-hosted, aks, linux]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4   # submodules not needed for smoke tests
 
       - name: Run smoke tests via APIM gateway
         env:
